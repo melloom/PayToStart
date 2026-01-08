@@ -1,0 +1,31 @@
+# Ignore files for Vercel deployment
+
+# Environment files (set in Vercel dashboard)
+.env
+.env.local
+.env.*.local
+
+# Development files
+.vscode
+.idea
+*.log
+.DS_Store
+
+# Test files
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+__tests__
+__mocks__
+
+# Documentation (optional, keep if you want)
+# *.md
+# docs/
+
+# Supabase migrations (already run in Supabase)
+supabase/migrations/
+
+# Local test files
+test-contract.pdf
+

@@ -1,0 +1,331 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useToast } from "@/components/ui/use-toast";
+import { Loader2, CreditCard, CheckCircle, Shield, Zap } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
+import type { Contract, Client } from "@/lib/types";
+
+// Initialize Stripe - will load the key from environment
+const getStripe = () => {
+  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+    throw new Error("Stripe publishable key not configured");
+  }
+  return loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+};
+
+export default function PaymentPage() {
+  const params = useParams();
+  const router = useRouter();
+  const { toast } = useToast();
+  const [contract, setContract] = useState<Contract | null>(null);
+  const [client, setClient] = useState<Client | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentCompleted, setPaymentCompleted] = useState(false);
+
+  useEffect(() => {
+    async function fetchContract() {
+      try {
+        const response = await fetch(`/api/contracts/sign/${params.token}`);
+        if (response.ok) {
+          const data = await response.json();
+          setContract(data.contract);
+          setClient(data.client);
+
+          // Check if already paid
+          if (data.contract.status === "paid" || data.contract.status === "completed") {
+            setPaymentCompleted(true);
+          } else if (data.contract.status !== "signed") {
+            // Must be signed first
+            router.push(`/sign/${params.token}`);
+          }
+        } else {
+          toast({
+            title: "Error",
+            description: "Contract not found or invalid link",
+            variant: "destructive",
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to load contract",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    if (params.token) {
+      fetchContract();
+    }
+  }, [params.token, router, toast]);
+
+  const handlePayment = async () => {
+    if (!contract || contract.depositAmount <= 0) return;
+
+    setIsProcessing(true);
+    try {
+      // Create Stripe checkout session
+      const response = await fetch("/api/stripe/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contractId: contract.id,
+          signingToken: params.token,
+          amount: contract.depositAmount,
+          currency: "usd",
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to create payment session");
+      }
+
+      const { sessionId } = await response.json();
+      const stripe = await getStripe();
+
+      if (!stripe) {
+        throw new Error("Stripe failed to load");
+      }
+
+      // Redirect to Stripe Checkout
+      const { error: stripeError } = await stripe.redirectToCheckout({
+        sessionId,
+      });
+
+      if (stripeError) {
+        throw stripeError;
+      }
+    } catch (error: any) {
+      toast({
+        title: "Payment failed",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+      setIsProcessing(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!contract || contract.depositAmount <= 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>No Payment Required</CardTitle>
+            <CardDescription>
+              This contract does not require a deposit payment.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  if (paymentCompleted || contract.status === "paid" || contract.status === "completed") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 flex items-center justify-center px-4 py-12">
+        <Card className="w-full max-w-lg border-2 border-green-200 shadow-2xl bg-white">
+          <CardHeader className="text-center pb-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg animate-pulse">
+                <CheckCircle className="h-10 w-10 text-white" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl font-bold text-slate-900 mb-2">
+              Payment Successful!
+            </CardTitle>
+            <CardDescription className="text-slate-600 text-lg">
+              Your deposit has been processed successfully
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 p-6 rounded-xl">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 font-medium">Amount Paid:</span>
+                  <span className="font-bold text-2xl text-green-600">
+                    ${contract.depositAmount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-3 border-t border-green-300">
+                  <span className="text-slate-600 font-medium">Remaining Balance:</span>
+                  <span className="font-semibold text-lg text-slate-700">
+                    ${(contract.totalAmount - contract.depositAmount).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl">
+              <p className="text-sm text-blue-900">
+                <strong className="font-semibold">What's Next?</strong>
+                <br />
+                Your contract has been finalized and a copy has been sent to your email. 
+                You'll receive a receipt for this payment shortly.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 text-sm text-slate-600">
+              <CheckCircle className="h-4 w-4 text-green-500" />
+              <span>Receipt sent to your email</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-purple-50 py-12 px-4">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="flex items-center justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg">
+              <CreditCard className="h-8 w-8 text-white" />
+            </div>
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Complete Your Payment</h1>
+          <p className="text-slate-600 text-lg">
+            Secure payment processing for faster contract completion
+          </p>
+        </div>
+
+        <Card className="border-2 border-slate-200 shadow-xl bg-white">
+          <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b border-slate-200">
+            <CardTitle className="text-2xl font-bold text-slate-900">Payment Summary</CardTitle>
+            <CardDescription className="text-slate-600">
+              Review your contract details and complete payment securely
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6 p-6">
+            {/* Contract Info */}
+            <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 p-6 rounded-xl space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 font-medium">Contract:</span>
+                <span className="font-bold text-slate-900 text-lg">{contract.title}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600 font-medium">Total Amount:</span>
+                <span className="font-semibold text-slate-700">${contract.totalAmount.toFixed(2)}</span>
+              </div>
+              <div className="border-t border-purple-300 pt-4 mt-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Deposit Required</p>
+                    <p className="text-xs text-slate-500">Pay now to secure your contract</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
+                      ${contract.depositAmount.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Benefits */}
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="w-8 h-8 rounded-lg bg-green-500 flex items-center justify-center flex-shrink-0">
+                  <CheckCircle className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="font-semibold text-green-900 text-sm">Instant Processing</p>
+                  <p className="text-xs text-green-700 mt-1">Payment processed immediately</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
+                  <Shield className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="font-semibold text-blue-900 text-sm">Secure & Safe</p>
+                  <p className="text-xs text-blue-700 mt-1">256-bit SSL encryption</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="w-8 h-8 rounded-lg bg-purple-500 flex items-center justify-center flex-shrink-0">
+                  <Zap className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="font-semibold text-purple-900 text-sm">Fast Completion</p>
+                  <p className="text-xs text-purple-700 mt-1">Contract finalized instantly</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Security Notice */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 p-5 rounded-xl">
+              <div className="flex items-start gap-3">
+                <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-blue-900 mb-1">Secure Payment Processing</p>
+                  <p className="text-sm text-blue-800">
+                    Your payment is processed securely through Stripe, a PCI-DSS Level 1 certified payment processor. 
+                    You'll receive a receipt via email immediately after payment completion.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Button */}
+            <Button
+              onClick={handlePayment}
+              disabled={isProcessing}
+              className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg hover:shadow-xl transition-all h-14 text-lg font-semibold"
+              size="lg"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Processing Payment...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  Pay ${contract.depositAmount.toFixed(2)} Now
+                </>
+              )}
+            </Button>
+
+            {/* Payment Methods */}
+            <div className="text-center pt-4 border-t border-slate-200">
+              <p className="text-xs text-slate-500 mb-2">Accepted Payment Methods</p>
+              <div className="flex items-center justify-center gap-2">
+                <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700">
+                  💳 Credit Cards
+                </div>
+                <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700">
+                  🏦 Debit Cards
+                </div>
+                <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700">
+                  📱 Apple Pay
+                </div>
+                <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700">
+                  📱 Google Pay
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
