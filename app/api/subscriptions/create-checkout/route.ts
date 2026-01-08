@@ -82,8 +82,28 @@ export async function POST(request: Request) {
       });
     }
 
+    // Check if company is in trial and get trial end date
+    const inTrial = company.trialEnd && new Date(company.trialEnd) > new Date();
+    const trialEndTimestamp = company.trialEnd 
+      ? Math.floor(new Date(company.trialEnd).getTime() / 1000)
+      : null;
+
     // Get Price ID from environment or use dynamic creation
     const priceId = process.env[`STRIPE_${tier.toUpperCase()}_PRICE_ID`];
+
+    // Build subscription_data with trial_end if in trial
+    const subscriptionData: any = {
+      metadata: {
+        companyId: company.id,
+        contractorId: contractor.id,
+        tier: tier,
+      },
+    };
+
+    // If in trial, set subscription to start after trial ends
+    if (inTrial && trialEndTimestamp) {
+      subscriptionData.trial_end = trialEndTimestamp;
+    }
 
     // Create Stripe Checkout Session for subscription
     const session = await stripe.checkout.sessions.create({
@@ -113,13 +133,7 @@ export async function POST(request: Request) {
               quantity: 1,
             },
       ],
-      subscription_data: {
-        metadata: {
-          companyId: company.id,
-          contractorId: contractor.id,
-          tier: tier,
-        },
-      },
+      subscription_data: subscriptionData,
       success_url: `${baseUrl}/dashboard?subscription=success`,
       cancel_url: `${baseUrl}/pricing?subscription=cancelled`,
       metadata: {

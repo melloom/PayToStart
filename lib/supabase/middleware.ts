@@ -23,44 +23,65 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.get(name)?.value;
         },
         set(name: string, value: string, options: CookieOptions) {
+          // Ensure proper cookie options for session persistence
+          const cookieOptions: CookieOptions = {
+            ...options,
+            path: options.path || "/",
+            sameSite: options.sameSite || "lax",
+            httpOnly: options.httpOnly ?? true,
+            secure: options.secure ?? (process.env.NODE_ENV === "production"),
+          };
+
           request.cookies.set({
             name,
             value,
-            ...options,
+            ...cookieOptions,
           });
+          
           supabaseResponse = NextResponse.next({
             request: {
               headers: request.headers,
             },
           });
+          
           supabaseResponse.cookies.set({
             name,
             value,
-            ...options,
+            ...cookieOptions,
           });
         },
         remove(name: string, options: CookieOptions) {
+          const cookieOptions: CookieOptions = {
+            ...options,
+            path: options.path || "/",
+            sameSite: options.sameSite || "lax",
+            httpOnly: options.httpOnly ?? true,
+            secure: options.secure ?? (process.env.NODE_ENV === "production"),
+          };
+
           request.cookies.set({
             name,
             value: "",
-            ...options,
+            ...cookieOptions,
           });
+          
           supabaseResponse = NextResponse.next({
             request: {
               headers: request.headers,
             },
           });
+          
           supabaseResponse.cookies.set({
             name,
             value: "",
-            ...options,
+            ...cookieOptions,
           });
         },
       },
     }
   );
 
-  // Refresh session if expired
+  // Refresh session if expired - this ensures the session is valid and cookies are updated
   await supabase.auth.getUser();
 
   return supabaseResponse;

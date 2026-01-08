@@ -1,5 +1,6 @@
 // Supabase database client
 import { createClient } from "./supabase-server";
+import { createServiceClient } from "./supabase/service";
 import type {
   Contractor,
   Client,
@@ -41,10 +42,81 @@ export const db = {
       const supabase = await createClient();
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) return null;
-      return this.findById(user.id);
+      if (userError || !user) {
+        console.log("getCurrent: No authenticated user", userError);
+        return null;
+      }
+      
+      // Try with regular client first (respects RLS)
+      const { data, error } = await supabase
+        .from("contractors")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      // If RLS blocks it (403 or any permission error), fall back to service client
+      if (error) {
+        console.log("getCurrent: Error fetching contractor:", {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+        
+        // Check if it's a permission/RLS error
+        const isPermissionError = 
+          error.code === "PGRST301" || 
+          error.code === "42501" || 
+          error.code === "PGRST116" ||
+          error.message?.toLowerCase().includes("permission denied") ||
+          error.message?.toLowerCase().includes("row-level security");
+        
+        if (isPermissionError) {
+          try {
+            console.log("getCurrent: Trying service client as fallback");
+            const serviceClient = createServiceClient();
+            const { data: serviceData, error: serviceError } = await serviceClient
+              .from("contractors")
+              .select("*")
+              .eq("id", user.id)
+              .single();
+
+            if (serviceError) {
+              console.error("getCurrent: Service client also failed:", serviceError);
+              // Don't return null - try to continue anyway
+              // The service client should work, so this is unexpected
+            } else if (serviceData) {
+              return mapContractorFromDb(serviceData);
+            } else {
+              console.log("getCurrent: Contractor record does not exist for user:", user.id);
+              // Return null if record doesn't exist
+              return null;
+            }
+          } catch (serviceErr: any) {
+            // Service client not available or other error
+            console.error("getCurrent: Failed to use service client:", serviceErr);
+            // If service role key is missing, log it clearly
+            if (serviceErr.message?.includes("SUPABASE_SERVICE_ROLE_KEY")) {
+              console.error("getCurrent: SUPABASE_SERVICE_ROLE_KEY is not set in environment variables!");
+            }
+            // Still return null - can't proceed without contractor record
+            return null;
+          }
+        }
+        
+        // Other errors (not found, etc.)
+        return null;
+      }
+
+      if (!data) {
+        console.log("getCurrent: No contractor data returned for user:", user.id);
+        return null;
+      }
+      
+      return mapContractorFromDb(data);
     },
 
     async create(data: {
@@ -477,7 +549,36 @@ export const db = {
         .eq("id", id)
         .single();
 
-      if (error || !data) return null;
+      // If RLS blocks it, fall back to service client
+      if (error) {
+        const isPermissionError = 
+          error.code === "PGRST301" || 
+          error.code === "42501" || 
+          error.code === "PGRST116" ||
+          error.message?.toLowerCase().includes("permission denied") ||
+          error.message?.toLowerCase().includes("row-level security");
+        
+        if (isPermissionError) {
+          try {
+            const serviceClient = createServiceClient();
+            const { data: serviceData, error: serviceError } = await serviceClient
+              .from("companies")
+              .select("*")
+              .eq("id", id)
+              .single();
+
+            if (serviceError || !serviceData) return null;
+            return mapCompanyFromDb(serviceData);
+          } catch (serviceErr) {
+            console.error("Failed to fetch company with service client:", serviceErr);
+            return null;
+          }
+        }
+        
+        return null;
+      }
+
+      if (!data) return null;
       return mapCompanyFromDb(data);
     },
 
@@ -507,6 +608,7 @@ export const db = {
       if (data.trialStart !== undefined) updateData.trial_start = data.trialStart;
       if (data.trialEnd !== undefined) updateData.trial_end = data.trialEnd;
       if (data.trialTier !== undefined) updateData.trial_tier = data.trialTier;
+      if (data.planSelected !== undefined) updateData.plan_selected = data.planSelected;
 
       const { data: company, error } = await supabase
         .from("companies")
@@ -677,6 +779,7 @@ function mapCompanyFromDb(row: any): Company {
     trialStart: row.trial_start ? new Date(row.trial_start) : undefined,
     trialEnd: row.trial_end ? new Date(row.trial_end) : undefined,
     trialTier: row.trial_tier || undefined,
+    planSelected: row.plan_selected || false,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };

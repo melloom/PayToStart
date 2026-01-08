@@ -44,11 +44,27 @@ export async function middleware(request: NextRequest) {
       headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
     }
     
-    return new NextResponse(response.body, {
+    // Create new response with security headers but preserve cookies from original response
+    const newResponse = new NextResponse(response.body, {
       status: response.status,
       statusText: response.statusText,
       headers,
     });
+    
+    // Copy all cookies from the original response to preserve session cookies
+    response.cookies.getAll().forEach((cookie) => {
+      newResponse.cookies.set(cookie.name, cookie.value, {
+        path: cookie.path,
+        domain: cookie.domain,
+        sameSite: cookie.sameSite as "strict" | "lax" | "none" | undefined,
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        maxAge: cookie.maxAge,
+        expires: cookie.expires,
+      });
+    });
+    
+    return newResponse;
   }
   
   return response;

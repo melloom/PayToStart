@@ -27,6 +27,9 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Plan check is disabled - allow access to dashboard
+  // TODO: Re-enable plan check after RLS policies are fully fixed
+
   // Get trial information
   const trialInfo = await getTrialInfo(contractor.companyId);
 
