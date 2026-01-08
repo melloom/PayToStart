@@ -73,7 +73,7 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
           <p className="text-slate-400 text-lg">
-            Welcome back, {contractor.name}! Here's an overview of your contracts.
+            Welcome back, {contractor.name}! Here&apos;s an overview of your contracts.
           </p>
         </div>
         <Link href="/dashboard/contracts/new" prefetch={true}>

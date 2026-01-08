@@ -34,7 +34,7 @@ export default function SignSuccessPage() {
             <ul className="text-sm text-green-800 mt-2 space-y-1 list-disc list-inside">
               <li>Your deposit payment has been confirmed</li>
               <li>The final contract PDF is being generated</li>
-              <li>You'll receive a copy via email shortly</li>
+              <li>You&apos;ll receive a copy via email shortly</li>
               <li>The contractor has also been notified</li>
             </ul>
           </div>

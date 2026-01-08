@@ -6,7 +6,7 @@ import { hashToken, verifyToken, isTokenExpired, getRateLimitConfig } from "@/li
 import { sendEmail } from "@/lib/email";
 import { getSignedButUnpaidEmail } from "@/lib/email/templates";
 import { signingPayloadSchema } from "@/lib/validations";
-import log from "@/lib/logger";
+import { log } from "@/lib/logger";
 
 // Public route - no auth required for signing
 
@@ -247,6 +247,13 @@ export async function POST(
       },
     });
 
+    if (!updatedContract) {
+      return NextResponse.json(
+        { error: "Failed to update contract" },
+        { status: 500 }
+      );
+    }
+
     // If deposit is required, create Stripe Checkout session and send email
     let checkoutUrl: string | null = null;
     if (updatedContract.depositAmount > 0) {
@@ -271,7 +278,7 @@ export async function POST(
               contractorCompany: contractor.companyName,
               clientName: client.name,
               clientEmail: client.email,
-              paymentUrl: checkoutUrl,
+              paymentUrl: checkoutUrl || undefined,
               depositAmount: updatedContract.depositAmount,
               totalAmount: updatedContract.totalAmount,
             });
@@ -292,11 +299,13 @@ export async function POST(
       }
     }
 
-    log.contract("signed", updatedContract.id, {
+    log.info({ 
+      event: "contract_signed",
+      contractId: updatedContract.id,
       clientId: updatedContract.clientId,
       hasSignatureImage: !!signatureDataUrl,
       depositRequired: updatedContract.depositAmount > 0,
-    });
+    }, "Contract signed successfully");
 
     return NextResponse.json({
       success: true,

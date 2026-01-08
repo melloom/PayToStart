@@ -160,7 +160,7 @@ export default function SubscriptionActions({
         {!nextTier && (
           <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
             <span className="text-sm font-medium text-green-700">
-              ✓ You're on the highest tier
+              ✓ You&apos;re on the highest tier
             </span>
           </div>
         )}

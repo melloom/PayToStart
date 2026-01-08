@@ -280,9 +280,9 @@ export async function POST(request: Request) {
         await db.companies.update(company.id, {
           subscriptionTier: "free",
           subscriptionStatus: "canceled",
-          subscriptionStripeSubscriptionId: null,
-          subscriptionCurrentPeriodStart: null,
-          subscriptionCurrentPeriodEnd: null,
+          subscriptionStripeSubscriptionId: undefined,
+          subscriptionCurrentPeriodStart: undefined,
+          subscriptionCurrentPeriodEnd: undefined,
           subscriptionCancelAtPeriodEnd: false,
         });
 

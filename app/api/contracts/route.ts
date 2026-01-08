@@ -6,7 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { getContractLinkEmail } from "@/lib/email/templates";
 import { canPerformAction, incrementUsage } from "@/lib/subscriptions";
 import { contractCreateSchema } from "@/lib/validations";
-import log from "@/lib/logger";
+import { log } from "@/lib/logger";
 import { checkAPIRateLimit, sanitizeInput, sanitizeEmail, validateContentType, createSecureErrorResponse, getClientIP } from "@/lib/security/api-security";
 
 export async function POST(request: Request) {
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
         companyId: contractor.companyId,
         email: sanitizedEmail,
         name: clientName,
-        phone: clientPhone,
+        phone: clientPhone || undefined,
       });
     }
 
@@ -171,13 +171,15 @@ export async function POST(request: Request) {
       // Don't fail contract creation if email fails
     }
 
-    log.contract("created", contract.id, {
+    log.info({ 
+      event: "contract_created",
+      contractId: contract.id,
       contractorId: contractor.id,
       clientEmail: sanitizedEmail,
       title,
       totalAmount,
       depositAmount,
-    });
+    }, "Contract created successfully");
 
     return NextResponse.json({
       success: true,

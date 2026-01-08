@@ -173,10 +173,10 @@ export default function PaymentPage() {
 
             <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl">
               <p className="text-sm text-blue-900">
-                <strong className="font-semibold">What's Next?</strong>
+                <strong className="font-semibold">What&apos;s Next?</strong>
                 <br />
                 Your contract has been finalized and a copy has been sent to your email. 
-                You'll receive a receipt for this payment shortly.
+                You&apos;ll receive a receipt for this payment shortly.
               </p>
             </div>
 
@@ -278,7 +278,7 @@ export default function PaymentPage() {
                   <p className="font-semibold text-blue-900 mb-1">Secure Payment Processing</p>
                   <p className="text-sm text-blue-800">
                     Your payment is processed securely through Stripe, a PCI-DSS Level 1 certified payment processor. 
-                    You'll receive a receipt via email immediately after payment completion.
+                    You&apos;ll receive a receipt via email immediately after payment completion.
                   </p>
                 </div>
               </div>

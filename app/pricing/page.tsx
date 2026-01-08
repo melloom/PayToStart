@@ -279,7 +279,7 @@ export default function PricingPage() {
                   What happens after the trial?
                 </h3>
                 <p className="text-slate-400 leading-relaxed text-base">
-                  After your 7-day free trial, you'll need to upgrade to a paid plan to continue using Pay2Start. You can cancel anytime.
+                  After your 7-day free trial, you&apos;ll need to upgrade to a paid plan to continue using Pay2Start. You can cancel anytime.
                 </p>
               </div>
             </div>
@@ -297,7 +297,7 @@ export default function PricingPage() {
                   Do you offer refunds?
                 </h3>
                 <p className="text-slate-400 leading-relaxed text-base">
-                  We offer a 30-day money-back guarantee. If you're not satisfied, contact us for a full refund.
+                  We offer a 30-day money-back guarantee. If you&apos;re not satisfied, contact us for a full refund.
                 </p>
               </div>
             </div>

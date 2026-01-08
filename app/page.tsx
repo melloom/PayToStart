@@ -289,7 +289,7 @@ export default function LandingPage() {
               </h1>
               
               <h2 className="text-2xl md:text-3xl font-semibold text-slate-300 leading-relaxed">
-                Start Getting Paid What You're Worth
+                Start Getting Paid What You&apos;re Worth
               </h2>
             </div>
 
@@ -861,7 +861,7 @@ export default function LandingPage() {
                 ))}
               </div>
               <p className="text-slate-300 mb-6 leading-relaxed text-[15px]">
-                "{testimonial.content}"
+                &quot;{testimonial.content}&quot;
               </p>
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">
@@ -892,7 +892,7 @@ export default function LandingPage() {
               Perfect for Every Contractor
             </h2>
             <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-              Whether you're a solo contractor or managing a team, Pay2Start scales with your business
+              Whether you&apos;re a solo contractor or managing a team, Pay2Start scales with your business
             </p>
           </motion.div>
 

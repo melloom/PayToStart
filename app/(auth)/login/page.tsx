@@ -110,7 +110,7 @@ export default function LoginPage() {
           <CardHeader>
             <CardTitle>Check your email</CardTitle>
             <CardDescription>
-              We've sent you a magic link to sign in. Click the link in the email to continue.
+              We&apos;ve sent you a magic link to sign in. Click the link in the email to continue.
             </CardDescription>
           </CardHeader>
           <CardFooter>
@@ -220,7 +220,7 @@ export default function LoginPage() {
         </CardContent>
         <CardFooter className="flex flex-col space-y-4">
           <div className="text-sm text-center text-gray-600">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/signup" className="text-primary hover:underline font-medium">
               Sign up
             </Link>

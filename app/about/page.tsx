@@ -35,7 +35,7 @@ export default function AboutPage() {
           </motion.div>
 
           <h1 className="text-5xl md:text-6xl font-bold mb-6 text-white">
-            Hi, I'm <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Melvin Peralta</span>
+            Hi, I&apos;m <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Melvin Peralta</span>
           </h1>
           
           <p className="text-2xl md:text-3xl text-slate-300 mb-8 font-medium">
@@ -75,22 +75,22 @@ export default function AboutPage() {
             </p>
 
             <p>
-              That's when I decided to build Pay2Start—a platform that would solve these problems once and for all. 
+              That&apos;s when I decided to build Pay2Start—a platform that would solve these problems once and for all. 
               I wanted to create something that would save contractors time, help them get paid faster, and give them 
               peace of mind knowing their contracts and payments were handled securely.
             </p>
 
             <div className="bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-xl p-6 border-l-4 border-indigo-500 my-8">
               <p className="text-slate-200 font-medium italic">
-                "Every feature in Pay2Start was built with one goal in mind: to make contractors' lives easier. 
-                Because when you're focused on your craft, you shouldn't have to worry about paperwork."
+                &quot;Every feature in Pay2Start was built with one goal in mind: to make contractors&apos; lives easier. 
+                Because when you&apos;re focused on your craft, you shouldn&apos;t have to worry about paperwork.&quot;
               </p>
               <p className="text-right mt-4 text-slate-400">— Melvin Peralta</p>
             </div>
 
             <p>
               Today, Pay2Start is helping thousands of contractors streamline their workflows, get paid faster, 
-              and focus on what they do best—building, creating, and serving their clients. And that's exactly 
+              and focus on what they do best—building, creating, and serving their clients. And that&apos;s exactly 
               what I set out to achieve.
             </p>
           </div>
@@ -171,18 +171,18 @@ export default function AboutPage() {
           <div className="space-y-6 text-lg leading-relaxed text-white/90 max-w-3xl mx-auto">
             <p>
               Building Pay2Start has been one of the most rewarding experiences of my career. Every time I hear 
-              from a contractor who's saved hours of work or gotten paid faster because of the platform, it reminds 
+              from a contractor who&apos;s saved hours of work or gotten paid faster because of the platform, it reminds 
               me why I started this journey.
             </p>
 
             <p>
-              I'm not just building software—I'm building a tool that helps real people run their businesses better. 
-              That's what gets me up every morning, coding, designing, and constantly thinking about how to make 
+              I&apos;m not just building software—I&apos;m building a tool that helps real people run their businesses better. 
+              That&apos;s what gets me up every morning, coding, designing, and constantly thinking about how to make 
               Pay2Start even better.
             </p>
 
             <p className="font-semibold text-xl mt-8">
-              If you're a contractor reading this, know that I built Pay2Start for you. Your feedback, your stories, 
+              If you&apos;re a contractor reading this, know that I built Pay2Start for you. Your feedback, your stories, 
               and your success are what keep me going.
             </p>
           </div>
@@ -199,10 +199,10 @@ export default function AboutPage() {
           transition={{ duration: 0.6 }}
         >
           <h2 className="text-3xl md:text-4xl font-bold mb-6 text-white">
-            Let's Build Something Together
+            Let&apos;s Build Something Together
           </h2>
           <p className="text-xl text-slate-400 mb-8 max-w-2xl mx-auto">
-            Have feedback, ideas, or just want to say hi? I'd love to hear from you.
+            Have feedback, ideas, or just want to say hi? I&apos;d love to hear from you.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link href="/signup">
