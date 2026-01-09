@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -122,10 +122,16 @@ export default function SelectPlanPage() {
         setRedirecting(true);
 
         // Use replace instead of push to avoid history stack issues
-        // Add small delay to ensure database update propagates
+        // Add small delay to ensure database update propagates and prevent rapid navigation
         setTimeout(() => {
-          router.replace("/dashboard");
-        }, 100);
+          try {
+            router.replace("/dashboard");
+          } catch (navError) {
+            console.error("Navigation error:", navError);
+            // Fallback to window.location if router fails
+            window.location.href = "/dashboard";
+          }
+        }, 200);
       } else {
         // For paid plans, redirect to Stripe checkout
         const response = await fetch("/api/subscriptions/create-checkout", {
@@ -152,6 +158,7 @@ export default function SelectPlanPage() {
         }
       }
     } catch (error: any) {
+      console.error("Error selecting plan:", error);
       toast({
         title: "Error",
         description: error.message || "Something went wrong. Please try again.",
