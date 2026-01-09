@@ -67,11 +67,11 @@ export default async function PricingLayout({
                       Templates
                     </Link>
                     <Link 
-                      href="/dashboard/subscription" 
+                      href="/dashboard/settings" 
                       prefetch={true}
                       className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all duration-200"
                     >
-                      Subscription
+                      Settings
                     </Link>
                     <Link 
                       href="/pricing" 
