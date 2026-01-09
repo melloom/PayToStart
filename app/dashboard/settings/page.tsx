@@ -241,7 +241,7 @@ export default async function SettingsPage() {
             </CardHeader>
             <CardContent className="p-6 space-y-3">
               <Link href="/dashboard/subscription" className="block">
-                <Button variant="outline" className="w-full justify-start">
+                <Button className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white">
                   Manage Subscription
                 </Button>
               </Link>

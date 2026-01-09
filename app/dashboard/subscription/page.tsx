@@ -10,6 +10,7 @@ import { Check, CreditCard, Calendar, AlertCircle, Zap, Shield, Users, FileText 
 import Link from "next/link";
 import { format } from "date-fns";
 import SubscriptionActions from "./subscription-actions";
+import ManageSubscription from "./manage-subscription";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -238,35 +239,8 @@ export default async function SubscriptionPage() {
             </Card>
           )}
 
-          {/* Billing Info */}
-          {currentTier !== "free" && (
-            <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-indigo-400" />
-                  Billing Information
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {company.subscriptionCurrentPeriodStart && (
-                  <div>
-                    <p className="text-sm text-slate-400 mb-1">Current Period</p>
-                    <p className="font-semibold text-white">
-                      {format(company.subscriptionCurrentPeriodStart, "MMM d")} - {format(company.subscriptionCurrentPeriodEnd || new Date(), "MMM d, yyyy")}
-                    </p>
-                  </div>
-                )}
-                {company.subscriptionStatus && (
-                  <div>
-                    <p className="text-sm text-slate-400 mb-1">Status</p>
-                    <Badge className="bg-slate-700 text-slate-300 border-slate-600">
-                      {company.subscriptionStatus}
-                    </Badge>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {/* Manage Subscription - Full Stripe Integration */}
+          <ManageSubscription customerId={company.subscriptionStripeCustomerId} />
 
           {/* Support Card */}
           <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
