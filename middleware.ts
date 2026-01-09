@@ -7,12 +7,12 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   
   // Skip middleware for static assets and API routes
+  // This must be done BEFORE any processing to avoid interfering with Next.js asset serving
   if (
-    pathname.startsWith("/_next/static") ||
-    pathname.startsWith("/_next/image") ||
-    pathname.startsWith("/_next/webpack") ||
+    pathname.startsWith("/_next/") || // All Next.js internal paths
     pathname.startsWith("/api/") ||
-    pathname.match(/\.(svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico)$/)
+    pathname.startsWith("/favicon.ico") ||
+    pathname.match(/\.(svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|css|js|json|map)$/i)
   ) {
     return NextResponse.next();
   }
@@ -95,12 +95,11 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
+     * - _next/ (all Next.js internal paths including static, chunks, etc.)
      * - favicon.ico (favicon file)
-     * - public folder
      * - api routes (handled separately)
+     * - static file extensions
      */
-    "/((?!_next/static|_next/image|_next/webpack|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot)$).*)",
+    "/((?!_next/|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|eot|ico|css|js|json|map)$).*)",
   ],
 };
