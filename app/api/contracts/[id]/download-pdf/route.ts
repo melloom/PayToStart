@@ -40,7 +40,7 @@ export async function GET(
     );
 
     // Return PDF as response
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(pdfBuffer as unknown as BodyInit, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="contract-${contract.id}.pdf"`,

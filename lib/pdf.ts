@@ -71,7 +71,7 @@ export async function generateContractPDF(
   });
 
   // Render to buffer
-  const buffer = await renderToBuffer(pdfDocument);
+  const buffer = await renderToBuffer(pdfDocument as any);
 
   return buffer;
 }

@@ -459,7 +459,7 @@ export const db = {
         p_actor_type: data.actorType,
         p_actor_id: data.actorId || null,
         p_metadata: data.metadata || {},
-      });
+      } as any);
 
       if (error) {
         // Log error but don't throw - audit logging shouldn't break the operation

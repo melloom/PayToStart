@@ -71,7 +71,7 @@ export async function saveSignature(
       ip_address: signatureData.ip,
       user_agent: signatureData.userAgent,
       contract_hash: signatureData.contractHash,
-    })
+    } as any)
     .select()
     .single();
 

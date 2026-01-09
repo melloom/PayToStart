@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe, STRIPE_MODE } from "@/lib/stripe";
+import { stripe, getStripeMode } from "@/lib/stripe";
 import { processCompletedCheckoutSession, isPaymentProcessed } from "@/lib/payments";
 import { finalizeContract } from "@/lib/finalization";
 import { db } from "@/lib/db";
@@ -7,11 +7,13 @@ import { headers } from "next/headers";
 import Stripe from "stripe";
 import type { SubscriptionTier } from "@/lib/types";
 
-// Get webhook secret based on mode
-const isTestMode = STRIPE_MODE === "test";
-const webhookSecret = isTestMode
-  ? process.env.STRIPE_TEST_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!
-  : process.env.STRIPE_LIVE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!;
+// Get webhook secret based on mode (lazy evaluation to avoid build-time errors)
+function getWebhookSecret(): string {
+  const isTestMode = getStripeMode() === "test";
+  return isTestMode
+    ? process.env.STRIPE_TEST_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!
+    : process.env.STRIPE_LIVE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!;
+}
 
 export async function POST(request: Request) {
   const body = await request.text();
@@ -24,6 +26,8 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const webhookSecret = getWebhookSecret();
 
   // Security: Validate webhook secret is configured
   if (!webhookSecret || webhookSecret === "whsec_your_webhook_secret") {
