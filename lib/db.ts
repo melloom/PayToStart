@@ -47,6 +47,19 @@ export const db = {
       return this.findById(user.id);
     },
 
+    async findByCompanyId(companyId: string): Promise<Contractor | null> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("contractors")
+        .select("*")
+        .eq("company_id", companyId)
+        .limit(1)
+        .single();
+
+      if (error || !data) return null;
+      return mapContractorFromDb(data);
+    },
+
     async create(data: {
       id: string;
       companyId: string;

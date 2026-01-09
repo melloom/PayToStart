@@ -6,6 +6,13 @@ import { db } from "@/lib/db";
 import { headers } from "next/headers";
 import Stripe from "stripe";
 import type { SubscriptionTier } from "@/lib/types";
+import { sendEmail } from "@/lib/email";
+import {
+  getInvoicePaymentSucceededEmail,
+  getInvoicePaymentFailedEmail,
+  getTrialWillEndEmail,
+  getInvoiceUpcomingEmail,
+} from "@/lib/email/subscription-templates";
 
 // Get webhook secret based on mode (lazy evaluation to avoid build-time errors)
 function getWebhookSecret(): string {
@@ -333,6 +340,263 @@ export async function POST(request: Request) {
       console.error("Error processing subscription cancellation:", error);
     }
 
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle invoice.payment_succeeded event (HIGH PRIORITY)
+  if (event.type === "invoice.payment_succeeded") {
+    const invoice = event.data.object as Stripe.Invoice;
+    
+    try {
+      // Only handle subscription invoices
+      if (invoice.subscription) {
+        const subscriptionId = invoice.subscription as string;
+        const company = await db.companies.findByStripeSubscriptionId(subscriptionId);
+        
+        if (company) {
+          const contractor = await db.contractors.findByCompanyId(company.id);
+          
+          if (contractor) {
+            // Get subscription to get tier
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            const tier = subscription.metadata?.tier as SubscriptionTier;
+            
+            // Create billing portal session URL
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : "http://localhost:3000";
+            const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
+            
+            // Send payment success email
+            const { subject, html } = getInvoicePaymentSucceededEmail({
+              contractorName: contractor.name,
+              contractorEmail: contractor.email,
+              companyName: company.name,
+              tier: tier,
+              amount: invoice.amount_paid,
+              invoiceUrl: invoice.hosted_invoice_url || undefined,
+              billingPortalUrl: billingPortalUrl,
+              nextBillingDate: invoice.period_end ? new Date(invoice.period_end * 1000) : undefined,
+            });
+            
+            await sendEmail({
+              to: contractor.email,
+              subject,
+              html,
+            });
+            
+            // Update subscription status if needed
+            await db.companies.update(company.id, {
+              subscriptionStatus: subscription.status,
+              subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
+              subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            });
+            
+            console.log(`Invoice payment succeeded for company ${company.id}, email sent to ${contractor.email}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Error processing invoice.payment_succeeded:", error);
+    }
+    
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle invoice.payment_failed event (HIGH PRIORITY)
+  if (event.type === "invoice.payment_failed") {
+    const invoice = event.data.object as Stripe.Invoice;
+    
+    try {
+      // Only handle subscription invoices
+      if (invoice.subscription) {
+        const subscriptionId = invoice.subscription as string;
+        const company = await db.companies.findByStripeSubscriptionId(subscriptionId);
+        
+        if (company) {
+          const contractor = await db.contractors.findByCompanyId(company.id);
+          
+          if (contractor) {
+            // Get subscription to get tier
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            const tier = subscription.metadata?.tier as SubscriptionTier;
+            
+            // Create billing portal session URL
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : "http://localhost:3000";
+            const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
+            
+            // Send payment failed email
+            const { subject, html } = getInvoicePaymentFailedEmail({
+              contractorName: contractor.name,
+              contractorEmail: contractor.email,
+              companyName: company.name,
+              tier: tier,
+              amount: invoice.amount_due,
+              billingPortalUrl: billingPortalUrl,
+            });
+            
+            await sendEmail({
+              to: contractor.email,
+              subject,
+              html,
+            });
+            
+            // Update subscription status
+            await db.companies.update(company.id, {
+              subscriptionStatus: subscription.status,
+            });
+            
+            console.log(`Invoice payment failed for company ${company.id}, email sent to ${contractor.email}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Error processing invoice.payment_failed:", error);
+    }
+    
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle customer.subscription.trial_will_end event (MEDIUM PRIORITY)
+  if (event.type === "customer.subscription.trial_will_end") {
+    const subscription = event.data.object as Stripe.Subscription;
+    
+    try {
+      const company = await db.companies.findByStripeSubscriptionId(subscription.id);
+      
+      if (company) {
+        const contractor = await db.contractors.findByCompanyId(company.id);
+        
+        if (contractor) {
+          const tier = subscription.metadata?.tier as SubscriptionTier;
+          
+          // Create billing portal session URL
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+            ? `https://${process.env.VERCEL_URL}` 
+            : "http://localhost:3000";
+          const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
+          
+          // Send trial ending email
+          const { subject, html } = getTrialWillEndEmail({
+            contractorName: contractor.name,
+            contractorEmail: contractor.email,
+            companyName: company.name,
+            tier: tier,
+            trialEndDate: subscription.trial_end ? new Date(subscription.trial_end * 1000) : undefined,
+            billingPortalUrl: billingPortalUrl,
+          });
+          
+          await sendEmail({
+            to: contractor.email,
+            subject,
+            html,
+          });
+          
+          console.log(`Trial will end notification sent to ${contractor.email} for company ${company.id}`);
+        }
+      }
+    } catch (error: any) {
+      console.error("Error processing customer.subscription.trial_will_end:", error);
+    }
+    
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle invoice.upcoming event (MEDIUM PRIORITY)
+  if (event.type === "invoice.upcoming") {
+    const invoice = event.data.object as Stripe.Invoice;
+    
+    try {
+      // Only handle subscription invoices
+      if (invoice.subscription) {
+        const subscriptionId = invoice.subscription as string;
+        const company = await db.companies.findByStripeSubscriptionId(subscriptionId);
+        
+        if (company) {
+          const contractor = await db.contractors.findByCompanyId(company.id);
+          
+          if (contractor) {
+            // Get subscription to get tier
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            const tier = subscription.metadata?.tier as SubscriptionTier;
+            
+            // Create billing portal session URL
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : "http://localhost:3000";
+            const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
+            
+            // Send upcoming invoice email
+            const { subject, html } = getInvoiceUpcomingEmail({
+              contractorName: contractor.name,
+              contractorEmail: contractor.email,
+              companyName: company.name,
+              tier: tier,
+              amount: invoice.amount_due,
+              nextBillingDate: invoice.period_end ? new Date(invoice.period_end * 1000) : undefined,
+              billingPortalUrl: billingPortalUrl,
+            });
+            
+            await sendEmail({
+              to: contractor.email,
+              subject,
+              html,
+            });
+            
+            console.log(`Upcoming invoice notification sent to ${contractor.email} for company ${company.id}`);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Error processing invoice.upcoming:", error);
+    }
+    
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle customer.subscription.paused event (LOW PRIORITY)
+  if (event.type === "customer.subscription.paused") {
+    const subscription = event.data.object as Stripe.Subscription;
+    
+    try {
+      const company = await db.companies.findByStripeSubscriptionId(subscription.id);
+      
+      if (company) {
+        await db.companies.update(company.id, {
+          subscriptionStatus: subscription.status,
+        });
+        
+        console.log(`Subscription paused for company ${company.id}`);
+      }
+    } catch (error: any) {
+      console.error("Error processing customer.subscription.paused:", error);
+    }
+    
+    return NextResponse.json({ received: true });
+  }
+
+  // Handle customer.subscription.resumed event (LOW PRIORITY)
+  if (event.type === "customer.subscription.resumed") {
+    const subscription = event.data.object as Stripe.Subscription;
+    
+    try {
+      const company = await db.companies.findByStripeSubscriptionId(subscription.id);
+      
+      if (company) {
+        await db.companies.update(company.id, {
+          subscriptionStatus: subscription.status,
+          subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
+          subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        });
+        
+        console.log(`Subscription resumed for company ${company.id}`);
+      }
+    } catch (error: any) {
+      console.error("Error processing customer.subscription.resumed:", error);
+    }
+    
     return NextResponse.json({ received: true });
   }
 
