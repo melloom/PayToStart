@@ -9,6 +9,8 @@ import { Plus, FileText, Clock, CheckCircle, DollarSign } from "lucide-react";
 import { format } from "date-fns";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Dashboard",
   description: "View your contract statistics and recent activity",

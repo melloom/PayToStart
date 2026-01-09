@@ -8,6 +8,8 @@ import { getTrialInfo } from "@/lib/subscriptions";
 import { db } from "@/lib/db";
 import { headers } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Dashboard",
   description: "Manage your contracts, templates, and payments from your Pay2Start dashboard",
