@@ -231,7 +231,7 @@ export async function POST(request: Request) {
       line_items: lineItems,
       subscription_data: subscriptionData,
       success_url: `${baseUrl}/dashboard?subscription=success`,
-      cancel_url: `${baseUrl}/pricing?subscription=cancelled`,
+      cancel_url: `${baseUrl}/dashboard/select-plan?subscription=cancelled`,
       locale: "en", // Set locale to English to avoid localization errors
       metadata: {
         companyId: company.id,

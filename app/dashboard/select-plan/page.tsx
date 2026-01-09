@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +90,20 @@ export default function SelectPlanPage() {
   const [loading, setLoading] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
 
+  // Check for cancelled subscription parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("subscription") === "cancelled") {
+      toast({
+        title: "Subscription cancelled",
+        description: "You can select a plan anytime. No charges were made.",
+        variant: "default",
+      });
+      // Clean up URL
+      router.replace("/dashboard/select-plan", { scroll: false });
+    }
+  }, [router, toast]);
+
   const handleSelectPlan = async (tierId: SubscriptionTier) => {
     // Prevent multiple simultaneous calls
     if (loading || redirecting) {
@@ -112,6 +126,11 @@ export default function SelectPlanPage() {
           throw new Error(data.message || "Failed to select plan");
         }
 
+        // Verify the plan was actually selected by checking the response
+        if (!data.success) {
+          throw new Error(data.message || "Failed to select plan");
+        }
+
         toast({
           title: "Plan selected!",
           description: "You've selected the Basic plan. You can upgrade anytime from your dashboard.",
@@ -121,17 +140,53 @@ export default function SelectPlanPage() {
         if (redirecting) return;
         setRedirecting(true);
 
-        // Use replace instead of push to avoid history stack issues
-        // Add small delay to ensure database update propagates and prevent rapid navigation
-        setTimeout(() => {
+        // Verify plan selection was successful before redirecting
+        // Add a small delay to ensure database update propagates
+        setTimeout(async () => {
           try {
-            router.replace("/dashboard");
-          } catch (navError) {
-            console.error("Navigation error:", navError);
-            // Fallback to window.location if router fails
-            window.location.href = "/dashboard";
+            // Double-check that plan was selected by verifying with the server
+            const verifyResponse = await fetch("/api/subscriptions/verify-plan", {
+              method: "GET",
+              cache: "no-store", // Ensure fresh data
+            });
+            
+            if (verifyResponse.ok) {
+              const verifyData = await verifyResponse.json();
+              if (verifyData.planSelected === true) {
+                // Plan is confirmed selected, safe to redirect
+                router.replace("/dashboard");
+              } else {
+                // Plan not actually selected, show error and stay on page
+                toast({
+                  title: "Error",
+                  description: "Plan selection was not confirmed. Please try again.",
+                  variant: "destructive",
+                });
+                setRedirecting(false);
+                setLoading(null);
+              }
+            } else {
+              // Verification failed, show error
+              toast({
+                title: "Error",
+                description: "Could not verify plan selection. Please try again.",
+                variant: "destructive",
+              });
+              setRedirecting(false);
+              setLoading(null);
+            }
+          } catch (verifyError) {
+            console.error("Error verifying plan selection:", verifyError);
+            // If verification fails, show error instead of redirecting
+            toast({
+              title: "Error",
+              description: "Could not verify plan selection. Please try again.",
+              variant: "destructive",
+            });
+            setRedirecting(false);
+            setLoading(null);
           }
-        }, 200);
+        }, 300);
       } else {
         // For paid plans, redirect to Stripe checkout
         const response = await fetch("/api/subscriptions/create-checkout", {
