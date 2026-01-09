@@ -6,9 +6,11 @@ import { TIER_CONFIG, type SubscriptionTier } from "@/lib/types";
 import Stripe from "stripe";
 
 export async function POST(request: Request) {
+  // Get Stripe mode (needed for error handling)
+  const stripeMode = process.env.STRIPE_MODE || "test";
+  
   try {
     // Check Stripe is configured
-    const stripeMode = process.env.STRIPE_MODE || "test";
     const isTestMode = stripeMode === "test";
     const secretKey = isTestMode 
       ? process.env.STRIPE_TEST_SECRET_KEY 
@@ -41,6 +43,14 @@ export async function POST(request: Request) {
     }
 
     console.log(`Using Stripe ${stripeMode.toUpperCase()} mode`);
+    
+    // Warn if in production but using test keys (or vice versa)
+    if (process.env.NODE_ENV === "production" && isTestMode) {
+      console.warn("⚠️ WARNING: Running in production but STRIPE_MODE=test. This should be 'live' for production!");
+    }
+    if (process.env.NODE_ENV === "production" && !isTestMode && secretKey.startsWith("sk_test_")) {
+      console.warn("⚠️ WARNING: STRIPE_MODE=live but using test key! Make sure STRIPE_LIVE_SECRET_KEY is set correctly.");
+    }
 
     // Check authentication
     const contractor = await getCurrentContractor();
@@ -245,13 +255,28 @@ export async function POST(request: Request) {
       raw: error.raw,
       stack: error.stack,
     });
+
+    // Check for specific error: test card used in live mode
+    const errorMessage = error.message || "";
+    const isTestCardInLiveMode = 
+      (errorMessage.includes("test card") && errorMessage.includes("live mode")) ||
+      (error.code === "card_declined" && errorMessage.toLowerCase().includes("test")) ||
+      (error.type === "StripeCardError" && errorMessage.toLowerCase().includes("test card"));
+
+    let userMessage = error.message || "Internal server error";
+    
+    if (isTestCardInLiveMode) {
+      userMessage = "You cannot use test card numbers in production mode. Please use a real credit card. If you're testing, set STRIPE_MODE=test in your environment variables. For production, use real credit cards only.";
+    }
+
     return NextResponse.json(
       { 
-        message: error.message || "Internal server error",
+        message: userMessage,
         details: process.env.NODE_ENV === "development" ? {
           type: error.type,
           code: error.code,
           statusCode: error.statusCode,
+          stripeMode: stripeMode,
         } : undefined,
       },
       { status: 500 }
