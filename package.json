@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "lsof -ti:3000 | xargs kill -9 2>/dev/null || true && next dev -p 3000",
-    "build": "next build",
+    "build": "next build && node scripts/fix-vercel-build.js",
     "start": "next start -p 3000",
     "lint": "next lint",
     "vercel": "vercel"

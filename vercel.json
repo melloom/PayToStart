@@ -1,6 +1,11 @@
 {
   "buildCommand": "npm run build",
   "framework": "nextjs",
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "functions": {
+    "app/**/*.ts": {
+      "includeFiles": ".next/server/app/**"
+    }
+  }
 }
 
