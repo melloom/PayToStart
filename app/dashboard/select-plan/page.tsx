@@ -17,7 +17,7 @@ const TIERS = [
     price: TIER_CONFIG.free.price,
     description: "Free plan with basic features",
     features: [
-      "No contracts",
+      "3 Contracts (lifetime)",
       "No templates",
       "Basic features",
       "Single company",

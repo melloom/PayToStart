@@ -135,7 +135,7 @@ export const TIER_CONFIG: Record<SubscriptionTier, { name: string; price: number
     price: 0,
     limits: {
       templates: 0,
-      contracts: 0,
+      contracts: 3, // Free plan allows 3 contracts ever (not per month)
       companies: 1,
       features: {
         clickToSign: false,
