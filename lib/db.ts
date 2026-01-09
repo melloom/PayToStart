@@ -113,6 +113,19 @@ export const db = {
 
       return mapContractorFromDb(contractor);
     },
+
+    async delete(id: string): Promise<void> {
+      const supabase = await createClient();
+      const { error } = await supabase
+        .from("contractors")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        console.error("Database error deleting contractor:", error);
+        throw new Error(`Database deletion failed: ${error.message || JSON.stringify(error)}`);
+      }
+    },
   },
 
   clients: {
