@@ -25,31 +25,34 @@ This guide walks you through setting up Stripe subscriptions for Pay2Start.
 
 #### Starter Plan ($29/month)
 - **Name**: `Starter Plan`
-- **Description**: `Pay2Start Starter subscription - 2 templates, 20 contracts/month`
+- **Description**: `7 days free, then $29.00 per month. Pay2Start Starter subscription - 2 templates, 20 contracts/month, Click to Sign, Email Delivery, Basic Support`
 - **Pricing**: 
   - **Price**: `$29.00`
   - **Billing period**: `Monthly`
   - **Recurring**: ✅ Yes
+  - **Trial period**: `7 days` (configure in Stripe Dashboard)
 - Click **Save product**
 - **Copy the Price ID** (starts with `price_`) - you'll need this
 
 #### Pro Plan ($79/month)
 - **Name**: `Pro Plan`
-- **Description**: `Pay2Start Pro subscription - Unlimited templates and contracts`
+- **Description**: `7 days free, then $79.00 per month. Pay2Start Pro subscription - Unlimited templates, Unlimited contracts, SMS Reminders, File Attachments, Custom Branding, Download All Contracts, Priority Support`
 - **Pricing**:
   - **Price**: `$79.00`
   - **Billing period**: `Monthly`
   - **Recurring**: ✅ Yes
+  - **Trial period**: `7 days` (configure in Stripe Dashboard)
 - Click **Save product**
 - **Copy the Price ID**
 
 #### Premium Plan ($149/month)
 - **Name**: `Premium Plan`
-- **Description**: `Pay2Start Premium subscription - All features including integrations`
+- **Description**: `7 days free, then $149.00 per month. Pay2Start Premium subscription - Everything in Pro, plus: Dropbox Sign Integration, DocuSign Integration, Multi-user Team Roles, Stripe Connect Payouts, Dedicated Support, Custom Integrations`
 - **Pricing**:
   - **Price**: `$149.00`
   - **Billing period**: `Monthly`
   - **Recurring**: ✅ Yes
+  - **Trial period**: `7 days` (configure in Stripe Dashboard)
 - Click **Save product**
 - **Copy the Price ID**
 

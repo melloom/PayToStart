@@ -34,19 +34,19 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const PRODUCTS = [
   {
     name: 'Starter Plan',
-    description: 'Pay2Start Starter subscription - 2 templates, 20 contracts/month',
+    description: '7 days free, then $29.00 per month. Pay2Start Starter subscription - 2 templates, 20 contracts/month, Click to Sign, Email Delivery, Basic Support',
     price: 2900, // $29.00 in cents
     tier: 'starter',
   },
   {
     name: 'Pro Plan',
-    description: 'Pay2Start Pro subscription - Unlimited templates and contracts',
+    description: '7 days free, then $79.00 per month. Pay2Start Pro subscription - Unlimited templates, Unlimited contracts, SMS Reminders, File Attachments, Custom Branding, Download All Contracts, Priority Support',
     price: 7900, // $79.00 in cents
     tier: 'pro',
   },
   {
     name: 'Premium Plan',
-    description: 'Pay2Start Premium subscription - All features including integrations',
+    description: '7 days free, then $149.00 per month. Pay2Start Premium subscription - Everything in Pro, plus: Dropbox Sign Integration, DocuSign Integration, Multi-user Team Roles, Stripe Connect Payouts, Dedicated Support, Custom Integrations',
     price: 14900, // $149.00 in cents
     tier: 'premium',
   },

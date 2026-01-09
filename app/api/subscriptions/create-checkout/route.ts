@@ -185,20 +185,31 @@ export async function POST(request: Request) {
       });
     } else {
       console.log("Creating dynamic price for tier:", tier, "price:", tierConfig.price);
-      lineItems.push({
-        price_data: {
-          currency: "usd",
-          product_data: {
-            name: `${tierConfig.name} Plan`,
-            description: `Pay2Start ${tierConfig.name} subscription`,
-          },
-          unit_amount: tierConfig.price * 100, // Convert to cents
-          recurring: {
-            interval: "month",
-          },
-        },
-        quantity: 1,
-      });
+            // Build detailed description with trial and pricing info
+            const getPlanDescription = (tier: SubscriptionTier) => {
+              const descriptions: Record<SubscriptionTier, string> = {
+                starter: "7 days free, then $29.00 per month. Pay2Start Starter subscription - 2 templates, 20 contracts/month, Click to Sign, Email Delivery, Basic Support",
+                pro: "7 days free, then $79.00 per month. Pay2Start Pro subscription - Unlimited templates, Unlimited contracts, SMS Reminders, File Attachments, Custom Branding, Download All Contracts, Priority Support",
+                premium: "7 days free, then $149.00 per month. Pay2Start Premium subscription - Everything in Pro, plus: Dropbox Sign Integration, DocuSign Integration, Multi-user Team Roles, Stripe Connect Payouts, Dedicated Support, Custom Integrations",
+                free: "Free plan - No contracts, No templates, Basic features only",
+              };
+              return descriptions[tier];
+            };
+
+            lineItems.push({
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: `${tierConfig.name} Plan`,
+                  description: getPlanDescription(tier as SubscriptionTier),
+                },
+                unit_amount: tierConfig.price * 100, // Convert to cents
+                recurring: {
+                  interval: "month",
+                },
+              },
+              quantity: 1,
+            });
     }
 
     // Create Stripe Checkout Session for subscription
