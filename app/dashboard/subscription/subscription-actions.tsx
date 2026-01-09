@@ -4,7 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, CreditCard, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Loader2, CreditCard, X, AlertTriangle, Calendar } from "lucide-react";
+import { format } from "date-fns";
 import type { Company, SubscriptionTier } from "@/lib/types";
 import { TIER_CONFIG } from "@/lib/types";
 
@@ -23,6 +32,7 @@ export default function SubscriptionActions({
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   const handleUpgrade = async (tier: SubscriptionTier) => {
     if (tier === currentTier) {
@@ -93,11 +103,11 @@ export default function SubscriptionActions({
     }
   };
 
-  const handleCancel = async () => {
-    if (!confirm("Are you sure you want to cancel your subscription? You'll continue to have access until the end of your billing period.")) {
-      return;
-    }
+  const handleCancelClick = () => {
+    setShowCancelDialog(true);
+  };
 
+  const handleCancelConfirm = async () => {
     setIsCancelling(true);
     try {
       const response = await fetch("/api/subscriptions/cancel", {
@@ -109,11 +119,14 @@ export default function SubscriptionActions({
         throw new Error(error.message || "Failed to cancel subscription");
       }
 
+      const data = await response.json();
+
       toast({
         title: "Subscription Cancelled",
-        description: "Your subscription will remain active until the end of your billing period.",
+        description: `Your subscription will remain active until ${company.subscriptionCurrentPeriodEnd ? format(company.subscriptionCurrentPeriodEnd, "MMMM d, yyyy") : "the end of your billing period"}. You'll continue to have full access until then.`,
       });
 
+      setShowCancelDialog(false);
       router.refresh();
     } catch (error: any) {
       toast({
@@ -234,24 +247,91 @@ export default function SubscriptionActions({
               </div>
             </div>
           ) : (
-            <Button
-              onClick={handleCancel}
-              disabled={isCancelling}
-              variant="outline"
-              className="border-red-600 text-red-300 hover:bg-red-900/50 hover:border-red-500"
-            >
-              {isCancelling ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Cancelling...
-                </>
-              ) : (
-                <>
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel Subscription
-                </>
-              )}
-            </Button>
+            <>
+              <Button
+                onClick={handleCancelClick}
+                disabled={isCancelling}
+                variant="outline"
+                className="border-red-600 text-red-300 hover:bg-red-900/50 hover:border-red-500"
+              >
+                <X className="h-4 w-4 mr-2" />
+                Cancel Subscription
+              </Button>
+
+              {/* Cancel Confirmation Dialog */}
+              <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+                <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+                  <DialogHeader>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-red-900/30 flex items-center justify-center">
+                        <AlertTriangle className="h-5 w-5 text-red-400" />
+                      </div>
+                      <DialogTitle className="text-xl font-bold">Cancel Subscription?</DialogTitle>
+                    </div>
+                    <DialogDescription className="text-slate-400 pt-2">
+                      Are you sure you want to cancel your subscription? This action can be undone.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="py-4 space-y-4">
+                    <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <Calendar className="h-5 w-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-sm font-semibold text-amber-300 mb-1">
+                            You&apos;ll keep full access until:
+                          </p>
+                          <p className="text-sm text-amber-200">
+                            {company.subscriptionCurrentPeriodEnd
+                              ? format(company.subscriptionCurrentPeriodEnd, "EEEE, MMMM d, yyyy")
+                              : "the end of your billing period"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-sm text-slate-300">
+                      <p className="font-semibold">What happens when you cancel:</p>
+                      <ul className="list-disc list-inside space-y-1 text-slate-400 ml-2">
+                        <li>Your subscription will remain active until the end of your billing period</li>
+                        <li>You&apos;ll continue to have full access to all features</li>
+                        <li>No further charges will be made</li>
+                        <li>You can resume your subscription anytime before it ends</li>
+                        <li>After the period ends, you&apos;ll be moved to the Free plan</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <DialogFooter className="flex-col sm:flex-row gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowCancelDialog(false)}
+                      disabled={isCancelling}
+                      className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    >
+                      Keep Subscription
+                    </Button>
+                    <Button
+                      onClick={handleCancelConfirm}
+                      disabled={isCancelling}
+                      className="bg-red-600 hover:bg-red-700 text-white"
+                    >
+                      {isCancelling ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Cancelling...
+                        </>
+                      ) : (
+                        <>
+                          <X className="h-4 w-4 mr-2" />
+                          Yes, Cancel Subscription
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </>
           )}
         </div>
       )}

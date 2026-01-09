@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, X, CreditCard, Calendar, Zap, Shield, FileText } from "lucide-react";
+import { Check, X, CreditCard, Calendar, Zap, Shield, FileText, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import ManageSubscription from "../subscription/manage-subscription";
 import SubscriptionActions from "../subscription/subscription-actions";
@@ -87,6 +87,24 @@ export default function SubscriptionTab({
             </CardHeader>
             <CardContent className="p-6">
               <div className="space-y-6">
+                {/* Cancellation Notice */}
+                {company.subscriptionCancelAtPeriodEnd && company.subscriptionCurrentPeriodEnd && (
+                  <div className="p-4 bg-amber-900/30 border-2 border-amber-700/50 rounded-lg backdrop-blur-sm">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-300 mb-1">
+                          Subscription Cancelled
+                        </p>
+                        <p className="text-sm text-amber-200">
+                          Your subscription will end on {format(company.subscriptionCurrentPeriodEnd, "MMMM d, yyyy")}. 
+                          You&apos;ll continue to have full access until then. You can resume your subscription anytime before it ends.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Plan Info */}
                 <div className="flex items-center justify-between p-6 bg-gradient-to-br from-indigo-600/20 via-purple-600/20 to-pink-600/20 border-2 border-indigo-500/30 rounded-xl backdrop-blur-sm">
                   <div>
