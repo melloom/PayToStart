@@ -10,6 +10,10 @@ import { format } from "date-fns";
 import ContractsListClient from "./contracts-list-client";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   title: "Contracts",
   description: "View and manage all your contracts",

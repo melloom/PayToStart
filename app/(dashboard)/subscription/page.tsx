@@ -12,6 +12,10 @@ import { format } from "date-fns";
 import SubscriptionActions from "./subscription-actions";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   title: "Subscription | Pay2Start",
   description: "Manage your Pay2Start subscription and billing",

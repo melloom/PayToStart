@@ -12,6 +12,10 @@ import { CopyButton } from "@/components/copy-button";
 import ContractActions from "./contract-actions";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
 async function getContract(id: string, contractorId: string) {
   const contract = await db.contracts.findById(id);
   if (!contract || contract.contractorId !== contractorId) {

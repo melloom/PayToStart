@@ -7,6 +7,10 @@ import { Plus } from "lucide-react";
 import TemplatesListClient from "./templates-list-client";
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   title: "Templates",
   description: "Manage your contract templates for faster contract creation",
