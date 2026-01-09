@@ -6,7 +6,7 @@ import { isSubscriptionActive, getUsageCount } from "@/lib/subscriptions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, CreditCard, Calendar, AlertCircle, Zap, Shield, Users, FileText } from "lucide-react";
+import { Check, X, CreditCard, Calendar, AlertCircle, Zap, Shield, Users, FileText } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import SubscriptionActions from "./subscription-actions";
@@ -169,7 +169,7 @@ export default async function SubscriptionPage() {
                 <div>
                   <h4 className="font-semibold text-white mb-4">Included Features</h4>
                   {(() => {
-                    const enabledFeatures = Object.entries(tierConfig.limits.features).filter(([_, enabled]) => enabled);
+                    const allFeatures = Object.entries(tierConfig.limits.features);
                     const featureNames: Record<string, string> = {
                       clickToSign: "Click to Sign",
                       emailDelivery: "Email Delivery",
@@ -183,11 +183,11 @@ export default async function SubscriptionPage() {
                       stripeConnectPayouts: "Stripe Connect Payouts",
                     };
 
-                    if (enabledFeatures.length === 0) {
+                    if (allFeatures.length === 0) {
                       return (
                         <div className="p-4 bg-slate-700/30 border border-slate-600 rounded-lg">
                           <p className="text-sm text-slate-400 text-center">
-                            This plan includes basic features only. Upgrade to unlock more features.
+                            No features configured for this plan.
                           </p>
                         </div>
                       );
@@ -195,10 +195,20 @@ export default async function SubscriptionPage() {
 
                     return (
                       <div className="grid md:grid-cols-2 gap-3">
-                        {enabledFeatures.map(([feature, _]) => (
-                          <div key={feature} className="flex items-center gap-2 text-sm text-slate-300">
-                            <Check className="h-4 w-4 text-green-400 flex-shrink-0" />
-                            <span>{featureNames[feature] || feature}</span>
+                        {allFeatures.map(([feature, enabled]) => (
+                          <div key={feature} className="flex items-center gap-2 text-sm">
+                            {enabled ? (
+                              <>
+                                <Check className="h-4 w-4 text-green-400 flex-shrink-0" />
+                                <span className="text-slate-300">{featureNames[feature] || feature}</span>
+                              </>
+                            ) : (
+                              <>
+                                <X className="h-4 w-4 text-slate-600 flex-shrink-0" />
+                                <span className="text-slate-500 line-through">{featureNames[feature] || feature}</span>
+                                <span className="text-xs text-slate-500 ml-1">(Not included)</span>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>
