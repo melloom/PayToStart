@@ -229,7 +229,7 @@ export default async function SubscriptionPage() {
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Upgrade Card */}
+          {/* Upgrade Plan Card - Show for free, starter, and pro tiers */}
           {currentTier !== "premium" && (
             <Card className="border-2 border-indigo-500/30 shadow-xl bg-gradient-to-br from-indigo-600/20 via-purple-600/20 to-pink-600/20 backdrop-blur-sm">
               <CardHeader>
@@ -249,8 +249,10 @@ export default async function SubscriptionPage() {
             </Card>
           )}
 
-          {/* Manage Subscription - Full Stripe Integration */}
-          <ManageSubscription customerId={company.subscriptionStripeCustomerId} />
+          {/* Manage Subscription - Only show for active paid subscriptions (not free tier) */}
+          {currentTier !== "free" && isActive && company.subscriptionStripeCustomerId && (
+            <ManageSubscription customerId={company.subscriptionStripeCustomerId} />
+          )}
 
           {/* Support Card */}
           <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
