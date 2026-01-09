@@ -93,7 +93,14 @@ export default function PricingPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
 
+  const [redirecting, setRedirecting] = useState(false);
+
   const handleSubscribe = async (tierId: string) => {
+    // Prevent multiple simultaneous calls
+    if (loading || redirecting) {
+      return;
+    }
+
     // Don't allow subscribing to free tier
     if (tierId === "free") {
       return;
@@ -117,16 +124,21 @@ export default function PricingPage() {
             description: "Please log in to subscribe to a plan.",
             variant: "destructive",
           });
-          router.push("/login");
+          // Use replace to avoid history stack issues
+          router.replace("/login");
           setLoading(null);
           return;
         }
         throw new Error(data.message || "Failed to create subscription");
       }
 
-      // Redirect to Stripe Checkout
+      // Prevent multiple redirects
+      if (redirecting) return;
+      setRedirecting(true);
+
+      // Redirect to Stripe Checkout - use replace to avoid history issues
       if (data.url) {
-        window.location.href = data.url;
+        window.location.replace(data.url);
       } else {
         throw new Error("No checkout URL returned");
       }
@@ -137,6 +149,7 @@ export default function PricingPage() {
         variant: "destructive",
       });
       setLoading(null);
+      setRedirecting(false);
     }
   };
 
