@@ -10,6 +10,8 @@ export function createClient() {
     );
   }
 
+  // createBrowserClient automatically handles session persistence via cookies
+  // and localStorage. No additional configuration needed.
   return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }
 

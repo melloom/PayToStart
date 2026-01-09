@@ -24,12 +24,18 @@ export async function updateSession(request: NextRequest) {
         },
         set(name: string, value: string, options: CookieOptions) {
           // Ensure proper cookie options for session persistence
+          // Use Supabase's maxAge if provided, otherwise set to 1 year for persistence
+          // Supabase will handle token refresh automatically via getUser() calls
           const cookieOptions: CookieOptions = {
             ...options,
             path: options.path || "/",
             sameSite: options.sameSite || "lax",
             httpOnly: options.httpOnly ?? true,
             secure: options.secure ?? (process.env.NODE_ENV === "production"),
+            // Set maxAge for persistent cookies
+            // If Supabase provides maxAge, use it; otherwise default to 1 year
+            // This ensures cookies persist across browser sessions
+            maxAge: options.maxAge ?? 60 * 60 * 24 * 365, // 1 year in seconds (fallback)
           };
 
           request.cookies.set({
@@ -82,6 +88,8 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Refresh session if expired - this ensures the session is valid and cookies are updated
+  // The getUser() call will automatically refresh the session token if it's expired
+  // and update the cookies via the set() method above
   await supabase.auth.getUser();
 
   return supabaseResponse;
