@@ -1,0 +1,32 @@
+# ==========================================
+# SUPABASE REDIRECT URLS - COPY & PASTE
+# ==========================================
+# Go to: Supabase Dashboard → Authentication → URL Configuration
+# ==========================================
+
+# Site URL (Production):
+https://pay2start.vercel.app
+
+# Redirect URLs - PRODUCTION (add each one):
+https://pay2start.vercel.app/auth/callback
+https://pay2start.vercel.app/dashboard
+https://pay2start.vercel.app
+
+# Redirect URLs - LOCAL DEVELOPMENT (add each one):
+http://localhost:3000/auth/callback
+http://localhost:3000/dashboard
+http://localhost:3000
+
+# ==========================================
+# STRIPE WEBHOOK URLS
+# ==========================================
+# Go to: Stripe Dashboard → Webhooks → Add endpoint
+# ==========================================
+
+# Production Webhook (Live Mode):
+https://pay2start.vercel.app/api/stripe/webhook
+
+# Local Development (use Stripe CLI):
+# Run: stripe listen --forward-to localhost:3000/api/stripe/webhook
+# This gives you a webhook secret starting with whsec_
+
