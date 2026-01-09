@@ -1,26 +1,9 @@
 import { redirect } from "next/navigation";
 import { getCurrentContractor } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { TIER_CONFIG, type SubscriptionTier } from "@/lib/types";
-import { isSubscriptionActive, getUsageCount } from "@/lib/subscriptions";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Check, X, CreditCard, Calendar, AlertCircle, Zap, Shield, Users, FileText } from "lucide-react";
-import Link from "next/link";
-import { format } from "date-fns";
-import SubscriptionActions from "./subscription-actions";
-import ManageSubscription from "./manage-subscription";
-import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
-
-export const metadata: Metadata = {
-  title: "Subscription | Pay2Start",
-  description: "Manage your Pay2Start subscription and billing",
-};
 
 export default async function SubscriptionPage() {
   const contractor = await getCurrentContractor();
@@ -29,10 +12,8 @@ export default async function SubscriptionPage() {
     redirect("/login");
   }
 
-  const company = await db.companies.findById(contractor.companyId);
-  if (!company) {
-    redirect("/login");
-  }
+  // Redirect to settings page with subscription tab
+  redirect("/dashboard/settings?tab=subscription");
 
   const isActive = await isSubscriptionActive(company.id);
   const currentTier = company.subscriptionTier;

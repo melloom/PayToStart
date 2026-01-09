@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { User, CreditCard, BarChart3 } from "lucide-react";
 import AccountSettings from "./account-settings";
 import SubscriptionTab from "./subscription-tab";
 import UsageTab from "./usage-tab";
+
+import type { Company, SubscriptionTier } from "@/lib/types";
 
 interface SettingsTabsProps {
   initialName: string;
@@ -20,6 +23,9 @@ interface SettingsTabsProps {
   templatesPercent: number;
   canCreateContract: { allowed: boolean; currentCount: number; limit: number | null };
   canCreateTemplate: { allowed: boolean; currentCount: number; limit: number | null };
+  company: Company;
+  isActive: boolean;
+  currentTier: SubscriptionTier;
 }
 
 export default function SettingsTabs({
@@ -35,8 +41,20 @@ export default function SettingsTabs({
   templatesPercent,
   canCreateContract,
   canCreateTemplate,
+  company,
+  isActive,
+  currentTier,
 }: SettingsTabsProps) {
-  const [activeTab, setActiveTab] = useState("account");
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(tabParam || "account");
+
+  // Update active tab when query param changes
+  useEffect(() => {
+    if (tabParam && ["account", "subscription", "usage"].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -60,7 +78,16 @@ export default function SettingsTabs({
       </TabsContent>
 
       <TabsContent value="subscription">
-        <SubscriptionTab customerId={customerId} effectiveTier={effectiveTier} tierConfig={tierConfig} />
+        <SubscriptionTab
+          customerId={customerId}
+          effectiveTier={effectiveTier}
+          tierConfig={tierConfig}
+          company={company}
+          isActive={isActive}
+          currentTier={currentTier}
+          templatesUsed={templatesUsage}
+          contractsUsed={contractsUsage}
+        />
       </TabsContent>
 
       <TabsContent value="usage">

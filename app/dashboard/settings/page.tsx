@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getTierLimits, getEffectiveTier, getUsageCount, canPerformAction } from "@/lib/subscriptions";
+import { getTierLimits, getEffectiveTier, getUsageCount, canPerformAction, isSubscriptionActive } from "@/lib/subscriptions";
 import { TIER_CONFIG } from "@/lib/types";
 import type { Metadata } from "next";
 import SettingsTabs from "./settings-tabs";
@@ -30,6 +30,8 @@ export default async function SettingsPage() {
   const effectiveTier = await getEffectiveTier(company.id);
   const tierLimits = getTierLimits(effectiveTier);
   const tierConfig = TIER_CONFIG[effectiveTier];
+  const currentTier = company.subscriptionTier;
+  const isActive = await isSubscriptionActive(company.id);
 
   // Get current usage
   const contractsUsage = await getUsageCount(company.id, "contracts");
@@ -72,6 +74,9 @@ export default async function SettingsPage() {
         templatesPercent={templatesPercent}
         canCreateContract={canCreateContract}
         canCreateTemplate={canCreateTemplate}
+        company={company}
+        isActive={isActive}
+        currentTier={currentTier}
       />
     </div>
   );

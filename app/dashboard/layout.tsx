@@ -133,13 +133,6 @@ export default async function DashboardLayout({
                   Templates
                 </Link>
                 <Link 
-                  href="/dashboard/subscription" 
-                  prefetch={true}
-                  className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all duration-200"
-                >
-                  Subscription
-                </Link>
-                <Link 
                   href="/dashboard/settings" 
                   prefetch={true}
                   className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-all duration-200"
