@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export const metadata: Metadata = {
   title: "Dashboard",
