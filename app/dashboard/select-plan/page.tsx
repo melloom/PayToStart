@@ -168,19 +168,20 @@ export default function SelectPlanPage() {
                   : "border-slate-700 bg-slate-800"
               }`}
             >
-              <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10 flex flex-col gap-1 items-center">
+              {/* Badges - positioned above card with proper spacing */}
+              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10 flex flex-col gap-1.5 items-center">
                 {tier.popular && (
-                  <span className="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md">
+                  <span className="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md whitespace-nowrap">
                     Most Popular
                   </span>
                 )}
                 {tier.hasTrial && (
-                  <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md">
+                  <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md whitespace-nowrap">
                     7-Day Free Trial
                   </span>
                 )}
               </div>
-              <CardHeader>
+              <CardHeader className={tier.popular && tier.hasTrial ? "pt-8" : tier.popular || tier.hasTrial ? "pt-6" : "pt-4"}>
                 <CardTitle className="text-2xl text-white">{tier.name}</CardTitle>
                 <CardDescription className="text-slate-400">{tier.description}</CardDescription>
                 <div className="mt-4">
