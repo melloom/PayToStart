@@ -10,6 +10,7 @@ import { Check, CreditCard, Calendar, AlertCircle, Zap, Shield, Users, FileText 
 import Link from "next/link";
 import { format } from "date-fns";
 import SubscriptionActions from "./subscription-actions";
+import PaymentMethods from "./payment-methods";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -238,12 +239,17 @@ export default async function SubscriptionPage() {
             </Card>
           )}
 
+          {/* Payment Methods */}
+          {currentTier !== "free" && (
+            <PaymentMethods />
+          )}
+
           {/* Billing Info */}
           {currentTier !== "free" && (
             <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-indigo-400" />
+                  <Calendar className="h-5 w-5 text-indigo-400" />
                   Billing Information
                 </CardTitle>
               </CardHeader>
