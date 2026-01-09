@@ -29,32 +29,34 @@ export async function middleware(request: NextRequest) {
   const response = await updateSession(request);
   
   // Add security headers to all responses
+  // If updateSession returns a response, use it; otherwise create a new one
+  const finalResponse = response || NextResponse.next();
+  const headers = new Headers(finalResponse.headers);
+  
+  // Add pathname header so server components can check the current path
+  headers.set("x-pathname", request.nextUrl.pathname);
+  
+  // Additional security headers
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "SAMEORIGIN");
+  headers.set("X-XSS-Protection", "1; mode=block");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  
+  // HSTS for HTTPS
+  if (request.nextUrl.protocol === "https:") {
+    headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  }
+  
+  // Create new response with security headers but preserve cookies from original response
+  const newResponse = new NextResponse(finalResponse.body, {
+    status: finalResponse.status,
+    statusText: finalResponse.statusText,
+    headers,
+  });
+  
+  // Copy all cookies from the original response to preserve session cookies
   if (response) {
-    const headers = new Headers(response.headers);
-    
-    // Add pathname header so server components can check the current path
-    headers.set("x-pathname", request.nextUrl.pathname);
-    
-    // Additional security headers
-    headers.set("X-Content-Type-Options", "nosniff");
-    headers.set("X-Frame-Options", "SAMEORIGIN");
-    headers.set("X-XSS-Protection", "1; mode=block");
-    headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-    headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-    
-    // HSTS for HTTPS
-    if (request.nextUrl.protocol === "https:") {
-      headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
-    }
-    
-    // Create new response with security headers but preserve cookies from original response
-    const newResponse = new NextResponse(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-    
-    // Copy all cookies from the original response to preserve session cookies
     response.cookies.getAll().forEach((cookie) => {
       newResponse.cookies.set(cookie.name, cookie.value, {
         path: cookie.path,
@@ -66,11 +68,9 @@ export async function middleware(request: NextRequest) {
         expires: cookie.expires,
       });
     });
-    
-    return newResponse;
   }
   
-  return response;
+  return newResponse;
 }
 
 export const config = {

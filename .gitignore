@@ -29,6 +29,13 @@ yarn-error.log*
 .env
 .env.local
 
+# Sensitive configuration files with real keys
+VERCEL_ENV_VARS.txt
+env.local.formatted
+LOCAL_DEVELOPMENT.txt
+SUPABASE_ENV_VARS.txt
+ENV_KEYS.txt
+
 # vercel
 .vercel
 
