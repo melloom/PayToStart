@@ -219,39 +219,40 @@ export default function SelectPlanPage() {
                     <span className="text-slate-400 ml-1">/month</span>
                   </div>
                 </CardHeader>
-              <CardContent>
-                <ul className="space-y-3 mb-6">
-                  {tier.features.map((feature, index) => {
-                    const isUpgradeHeader = feature.startsWith("Everything in");
-                    return (
-                      <li key={index} className="flex items-start gap-2">
-                        {!isUpgradeHeader && (
-                          <CheckCircle2 className="h-5 w-5 text-green-400 mt-0.5 flex-shrink-0" />
-                        )}
-                        <span className={`text-sm font-medium ${isUpgradeHeader ? "text-indigo-400 font-bold italic" : "text-slate-300"}`}>
-                          {feature}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <Button
-                  className="w-full"
-                  variant={tier.popular ? "default" : "outline"}
-                  onClick={() => handleSelectPlan(tier.id)}
-                  disabled={loading === tier.id}
-                >
-                  {loading === tier.id ? (
-                    "Processing..."
-                  ) : tier.id === "free" ? (
-                    "Select Basic Plan"
-                  ) : (
-                    "Start Free Trial"
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                <CardContent>
+                  <ul className="space-y-3 mb-6">
+                    {tier.features.map((feature, index) => {
+                      const isUpgradeHeader = feature.startsWith("Everything in");
+                      return (
+                        <li key={index} className="flex items-start gap-2">
+                          {!isUpgradeHeader && (
+                            <CheckCircle2 className="h-5 w-5 text-green-400 mt-0.5 flex-shrink-0" />
+                          )}
+                          <span className={`text-sm font-medium ${isUpgradeHeader ? "text-indigo-400 font-bold italic" : "text-slate-300"}`}>
+                            {feature}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <Button
+                    className="w-full"
+                    variant={tier.popular ? "default" : "outline"}
+                    onClick={() => handleSelectPlan(tier.id)}
+                    disabled={loading === tier.id}
+                  >
+                    {loading === tier.id ? (
+                      "Processing..."
+                    ) : tier.id === "free" ? (
+                      "Select Basic Plan"
+                    ) : (
+                      "Start Free Trial"
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         {/* Features Comparison */}
@@ -293,4 +294,3 @@ export default function SelectPlanPage() {
     </div>
   );
 }
-
