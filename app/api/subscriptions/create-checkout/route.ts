@@ -166,13 +166,15 @@ export async function POST(request: Request) {
     // Get Price ID from environment or use dynamic creation
     const priceId = process.env[`STRIPE_${tier.toUpperCase()}_PRICE_ID`];
 
-    // Build subscription_data with metadata
+    // Build subscription_data with metadata and trial period
     const subscriptionData: any = {
       metadata: {
         companyId: company.id,
         contractorId: contractor.id,
         tier: tier,
       },
+      // Add 7-day free trial for all paid plans
+      trial_period_days: 7,
     };
 
     // Build line items
