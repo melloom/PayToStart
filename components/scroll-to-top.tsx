@@ -1,43 +1,37 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 export function ScrollToTop() {
   const pathname = usePathname();
+  const lastPathname = useRef<string>("");
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Scroll to top on route change
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [pathname]);
-
-  useEffect(() => {
-    // Scroll to top on initial page load/refresh
-    if (typeof window !== "undefined") {
-      // Immediate scroll on load
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    // Only scroll if pathname actually changed
+    if (pathname !== lastPathname.current) {
+      lastPathname.current = pathname;
       
-      // Also handle browser back/forward navigation
-      const handlePopState = () => {
-        window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-      };
+      // Clear any pending scroll
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
       
-      // Handle page visibility change (when user comes back to tab)
-      const handleVisibilityChange = () => {
-        if (!document.hidden) {
+      // Debounce scroll to prevent excessive calls
+      scrollTimeoutRef.current = setTimeout(() => {
+        if (typeof window !== "undefined" && window.scrollY > 0) {
           window.scrollTo({ top: 0, left: 0, behavior: "instant" });
         }
-      };
-      
-      window.addEventListener("popstate", handlePopState);
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-      
-      return () => {
-        window.removeEventListener("popstate", handlePopState);
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      };
+      }, 50);
     }
-  }, []);
+
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [pathname]);
 
   return null;
 }
