@@ -74,7 +74,13 @@ export default function SettingsTabs({
       </TabsList>
 
       <TabsContent value="account">
-        <AccountSettings initialName={initialName} initialEmail={initialEmail} />
+        <AccountSettings
+          initialName={initialName}
+          initialEmail={initialEmail}
+          company={company}
+          currentTier={currentTier}
+          isActive={isActive}
+        />
       </TabsContent>
 
       <TabsContent value="subscription">

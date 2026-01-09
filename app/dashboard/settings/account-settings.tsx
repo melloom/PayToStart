@@ -15,14 +15,27 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Loader2, User, Mail, Save, Lock, Shield, Trash2, Bell, Eye, EyeOff } from "lucide-react";
+import { Loader2, User, Mail, Save, Lock, Shield, Trash2, Bell, Eye, EyeOff, Download, AlertTriangle, X, Calendar } from "lucide-react";
+import { format } from "date-fns";
+import type { Company, SubscriptionTier } from "@/lib/types";
+import { useRouter } from "next/navigation";
 
 interface AccountSettingsProps {
   initialName: string;
   initialEmail: string;
+  company: Company;
+  currentTier: SubscriptionTier;
+  isActive: boolean;
 }
 
-export default function AccountSettings({ initialName, initialEmail }: AccountSettingsProps) {
+export default function AccountSettings({
+  initialName,
+  initialEmail,
+  company,
+  currentTier,
+  isActive,
+}: AccountSettingsProps) {
+  const router = useRouter();
   const { toast } = useToast();
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState(initialEmail);
@@ -41,8 +54,15 @@ export default function AccountSettings({ initialName, initialEmail }: AccountSe
 
   // Account deletion state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showCancelSubscriptionDialog, setShowCancelSubscriptionDialog] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [subscriptionCancelled, setSubscriptionCancelled] = useState(false);
+
+  // Check if user has active paid subscription
+  const hasActiveSubscription = currentTier !== "free" && isActive && company.subscriptionStripeSubscriptionId;
 
   useEffect(() => {
     const changed = name !== initialName || email !== initialEmail;
@@ -156,6 +176,90 @@ export default function AccountSettings({ initialName, initialEmail }: AccountSe
       });
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  const handleExportContracts = async () => {
+    setIsExporting(true);
+    try {
+      const response = await fetch("/api/account/export-contracts", {
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to export contracts");
+      }
+
+      // Download the ZIP file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pay2start-contracts-export-${new Date().toISOString().split("T")[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast({
+        title: "Contracts exported",
+        description: "Your contracts have been exported successfully.",
+      });
+    } catch (error: any) {
+      console.error("Error exporting contracts:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to export contracts. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    // If user has active subscription, show cancel subscription dialog first
+    if (hasActiveSubscription && !subscriptionCancelled) {
+      setShowCancelSubscriptionDialog(true);
+    } else {
+      // Otherwise, go straight to delete dialog
+      setShowDeleteDialog(true);
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    setIsCancellingSubscription(true);
+    try {
+      const response = await fetch("/api/subscriptions/cancel", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to cancel subscription");
+      }
+
+      toast({
+        title: "Subscription Cancelled",
+        description: "Your subscription will remain active until the end of your billing period.",
+      });
+
+      setSubscriptionCancelled(true);
+      setShowCancelSubscriptionDialog(false);
+      // Show delete dialog after cancelling subscription
+      setTimeout(() => {
+        setShowDeleteDialog(true);
+      }, 500);
+    } catch (error: any) {
+      console.error("Error cancelling subscription:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to cancel subscription. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCancellingSubscription(false);
     }
   };
 
@@ -458,26 +562,143 @@ export default function AccountSettings({ initialName, initialEmail }: AccountSe
                 Once you delete your account, there is no going back. This will permanently delete
                 your account, contracts, templates, and all associated data. This action cannot be undone.
               </p>
+
+              {/* Export Contracts Button */}
+              <div className="mb-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleExportContracts}
+                  disabled={isExporting}
+                  className="bg-slate-700/50 border-slate-600 text-white hover:bg-slate-700 hover:text-white mb-2"
+                >
+                  {isExporting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Exporting...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      Export All Contracts
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-slate-500 mt-1">
+                  Download all your contracts as a ZIP file before deleting your account
+                </p>
+              </div>
+
+              {/* Cancel Subscription Dialog */}
+              <Dialog open={showCancelSubscriptionDialog} onOpenChange={setShowCancelSubscriptionDialog}>
+                <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
+                  <DialogHeader>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-amber-900/30 flex items-center justify-center">
+                        <AlertTriangle className="h-5 w-5 text-amber-400" />
+                      </div>
+                      <DialogTitle className="text-xl font-bold">Cancel Subscription First?</DialogTitle>
+                    </div>
+                    <DialogDescription className="text-slate-400 pt-2">
+                      You have an active subscription. Would you like to cancel it before deleting your account?
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="py-4 space-y-4">
+                    <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <Calendar className="h-5 w-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="text-sm font-semibold text-amber-300 mb-1">
+                            Your subscription will remain active until:
+                          </p>
+                          <p className="text-sm text-amber-200">
+                            {company.subscriptionCurrentPeriodEnd
+                              ? format(company.subscriptionCurrentPeriodEnd, "EEEE, MMMM d, yyyy")
+                              : "the end of your billing period"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-sm text-slate-300">
+                      <p className="font-semibold">What happens:</p>
+                      <ul className="list-disc list-inside space-y-1 text-slate-400 ml-2">
+                        <li>Your subscription will be cancelled</li>
+                        <li>You&apos;ll keep access until the end of your billing period</li>
+                        <li>After cancellation, you can proceed to delete your account</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <DialogFooter className="flex-col sm:flex-row gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCancelSubscriptionDialog(false);
+                        // Skip cancellation and go straight to delete
+                        setShowDeleteDialog(true);
+                      }}
+                      disabled={isCancellingSubscription}
+                      className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    >
+                      Skip & Delete Account
+                    </Button>
+                    <Button
+                      onClick={handleCancelSubscription}
+                      disabled={isCancellingSubscription}
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                    >
+                      {isCancellingSubscription ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Cancelling...
+                        </>
+                      ) : (
+                        <>
+                          <X className="h-4 w-4 mr-2" />
+                          Yes, Cancel Subscription
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Delete Account Dialog */}
               <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
                 <DialogTrigger asChild>
                   <Button
                     type="button"
                     variant="destructive"
+                    onClick={handleDeleteClick}
                     className="bg-red-600 hover:bg-red-700 text-white"
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete Account
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="bg-slate-800 border-slate-700 text-white">
+                <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-md">
                   <DialogHeader>
-                    <DialogTitle className="text-white text-red-400">Delete Account</DialogTitle>
-                    <DialogDescription className="text-slate-400">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-full bg-red-900/30 flex items-center justify-center">
+                        <AlertTriangle className="h-5 w-5 text-red-400" />
+                      </div>
+                      <DialogTitle className="text-xl font-bold text-red-400">Delete Account</DialogTitle>
+                    </div>
+                    <DialogDescription className="text-slate-400 pt-2">
                       This action cannot be undone. This will permanently delete your account and
                       all associated data including contracts, templates, and payment information.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
+                    {subscriptionCancelled && (
+                      <div className="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+                        <p className="text-sm text-green-300">
+                          ✓ Subscription cancelled. You can now delete your account.
+                        </p>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label htmlFor="deleteConfirm" className="text-slate-300">
                         Type <span className="font-bold text-red-400">DELETE</span> to confirm:
@@ -492,7 +713,7 @@ export default function AccountSettings({ initialName, initialEmail }: AccountSe
                       />
                     </div>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-col sm:flex-row gap-2">
                     <Button
                       type="button"
                       variant="outline"
@@ -500,7 +721,8 @@ export default function AccountSettings({ initialName, initialEmail }: AccountSe
                         setShowDeleteDialog(false);
                         setDeleteConfirmText("");
                       }}
-                      className="bg-slate-700/50 border-slate-600 text-white hover:bg-slate-700"
+                      disabled={isDeleting}
+                      className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
                     >
                       Cancel
                     </Button>
