@@ -27,3 +27,4 @@ SELECT cron.schedule(
 -- To unschedule a job later:
 -- SELECT cron.unschedule('expire-trials-hourly');
 
+

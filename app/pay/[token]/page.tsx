@@ -6,16 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
 import { Loader2, CreditCard, CheckCircle, Shield, Zap } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
 import type { Contract, Client } from "@/lib/types";
-
-// Initialize Stripe - will load the key from environment
-const getStripe = () => {
-  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-    throw new Error("Stripe publishable key not configured");
-  }
-  return loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
-};
+import { getStripe } from "@/lib/stripe";
 
 export default function PaymentPage() {
   const params = useParams();
@@ -328,4 +320,5 @@ export default function PaymentPage() {
     </div>
   );
 }
+
 

@@ -278,3 +278,4 @@ All cron endpoints are protected with `CRON_SECRET`. Make sure to:
 - Run the migration that creates `expire_trials()` function
 - Check it exists: `SELECT * FROM pg_proc WHERE proname = 'expire_trials';`
 
+

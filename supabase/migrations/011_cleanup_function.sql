@@ -25,3 +25,4 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Grant execute permission to authenticated users (for API calls)
 GRANT EXECUTE ON FUNCTION cleanup_old_contracts() TO authenticated;
 
+

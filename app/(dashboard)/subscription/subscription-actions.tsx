@@ -25,7 +25,14 @@ export default function SubscriptionActions({
   const [isCancelling, setIsCancelling] = useState(false);
 
   const handleUpgrade = async (tier: SubscriptionTier) => {
-    if (tier === currentTier) return;
+    if (tier === currentTier) {
+      toast({
+        title: "Already on this plan",
+        description: `You are already on the ${tier} plan.`,
+        variant: "default",
+      });
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -35,21 +42,51 @@ export default function SubscriptionActions({
         body: JSON.stringify({ tier }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to create checkout session");
+      // Handle specific error cases first (before reading body)
+      if (response.status === 401) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to upgrade your plan.",
+          variant: "destructive",
+        });
+        router.push("/login");
+        setIsLoading(false);
+        return;
       }
 
-      const { url } = await response.json();
+      // Read response body once
+      const responseText = await response.text();
+      let data: any = {};
+
+      // Try to parse JSON response
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error("Error parsing JSON response:", parseError, "Response:", responseText);
+          throw new Error("Invalid response from server. Please try again.");
+        }
+      }
+
+      // Check if response is ok after parsing
+      if (!response.ok) {
+        const errorMessage = data.message || `Failed to create checkout session (Status: ${response.status})`;
+        throw new Error(errorMessage);
+      }
+
+      // Handle successful response
+      const { url } = data;
       if (url) {
+        // Redirect to Stripe Checkout
         window.location.href = url;
       } else {
-        throw new Error("No checkout URL received");
+        throw new Error("No checkout URL received from server");
       }
     } catch (error: any) {
+      console.error("Error upgrading subscription:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to start upgrade process",
+        description: error.message || "Failed to start upgrade process. Please try again.",
         variant: "destructive",
       });
       setIsLoading(false);
@@ -122,15 +159,26 @@ export default function SubscriptionActions({
   const currentTierIndex = tiers.indexOf(currentTier);
   const nextTier = tiers[currentTierIndex + 1];
 
+  // Get display name for tier
+  const getTierDisplayName = (tier: SubscriptionTier) => {
+    const names: Record<SubscriptionTier, string> = {
+      free: "Free",
+      starter: "Starter",
+      pro: "Pro",
+      premium: "Premium",
+    };
+    return names[tier];
+  };
+
   return (
-    <div className="space-y-4 pt-4 border-t border-slate-200">
+    <div className="space-y-4 pt-4 border-t border-slate-700">
       {/* Upgrade/Downgrade Buttons */}
       <div className="flex flex-wrap gap-3">
         {nextTier && (
           <Button
             onClick={() => handleUpgrade(nextTier)}
-            disabled={isLoading}
-            className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-lg"
+            disabled={isLoading || isCancelling}
+            className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg font-semibold"
           >
             {isLoading ? (
               <>
@@ -140,7 +188,7 @@ export default function SubscriptionActions({
             ) : (
               <>
                 <CreditCard className="h-4 w-4 mr-2" />
-                Upgrade to {nextTier.charAt(0).toUpperCase() + nextTier.slice(1)}
+                Upgrade to {getTierDisplayName(nextTier)}
               </>
             )}
           </Button>
@@ -151,15 +199,15 @@ export default function SubscriptionActions({
             onClick={() => handleUpgrade(tiers[currentTierIndex - 1])}
             disabled={isLoading}
             variant="outline"
-            className="border-slate-300 text-slate-700 hover:bg-slate-50"
+            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-slate-500"
           >
             Downgrade Plan
           </Button>
         )}
 
         {!nextTier && (
-          <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
-            <span className="text-sm font-medium text-green-700">
+          <div className="flex items-center gap-2 px-4 py-2 bg-green-900/30 border border-green-700/50 rounded-lg backdrop-blur-sm">
+            <span className="text-sm font-medium text-green-300">
               ✓ You&apos;re on the highest tier
             </span>
           </div>
@@ -168,18 +216,18 @@ export default function SubscriptionActions({
 
       {/* Cancel/Resume Subscription */}
       {currentTier !== "free" && (
-        <div className="pt-4 border-t border-slate-200">
+        <div className="pt-4 border-t border-slate-700">
           {company.subscriptionCancelAtPeriodEnd ? (
             <div className="space-y-3">
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800 mb-2">
+              <div className="p-4 bg-amber-900/30 border border-amber-700/50 rounded-lg backdrop-blur-sm">
+                <p className="text-sm text-amber-300 mb-2">
                   Your subscription is set to cancel at the end of your billing period.
                 </p>
                 <Button
                   onClick={handleResume}
                   disabled={isLoading}
                   variant="outline"
-                  className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                  className="border-amber-600 text-amber-300 hover:bg-amber-900/50 hover:border-amber-500"
                 >
                   Resume Subscription
                 </Button>
@@ -190,7 +238,7 @@ export default function SubscriptionActions({
               onClick={handleCancel}
               disabled={isCancelling}
               variant="outline"
-              className="border-red-300 text-red-700 hover:bg-red-50 hover:border-red-400"
+              className="border-red-600 text-red-300 hover:bg-red-900/50 hover:border-red-500"
             >
               {isCancelling ? (
                 <>

@@ -3,19 +3,52 @@ import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import { TIER_CONFIG, type SubscriptionTier } from "@/lib/types";
+import Stripe from "stripe";
 
 export async function POST(request: Request) {
   try {
+    // Check Stripe is configured
+    const stripeMode = process.env.STRIPE_MODE || "test";
+    const isTestMode = stripeMode === "test";
+    const secretKey = isTestMode 
+      ? process.env.STRIPE_TEST_SECRET_KEY 
+      : process.env.STRIPE_LIVE_SECRET_KEY;
+
+    if (!secretKey) {
+      const keyName = isTestMode ? "STRIPE_TEST_SECRET_KEY" : "STRIPE_LIVE_SECRET_KEY";
+      console.error(`${keyName} is not set`);
+      return NextResponse.json(
+        { message: `Stripe is not configured. Missing ${keyName}` },
+        { status: 500 }
+      );
+    }
+
+    console.log(`Using Stripe ${stripeMode.toUpperCase()} mode`);
+
     // Check authentication
     const contractor = await getCurrentContractor();
     if (!contractor) {
+      console.error("No contractor found - unauthorized");
       return NextResponse.json(
         { message: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const { tier } = await request.json();
+    console.log("Contractor authenticated:", contractor.id, contractor.email);
+
+    let tier: string;
+    try {
+      const body = await request.json();
+      tier = body.tier;
+      console.log("Request tier:", tier);
+    } catch (jsonError: any) {
+      console.error("Error parsing request JSON:", jsonError);
+      return NextResponse.json(
+        { message: "Invalid request body" },
+        { status: 400 }
+      );
+    }
 
     if (!tier) {
       return NextResponse.json(
@@ -42,12 +75,19 @@ export async function POST(request: Request) {
     }
 
     // Get company
-    const company = await db.companies.findById(contractor.companyId);
-    if (!company) {
-      return NextResponse.json(
-        { message: "Company not found" },
-        { status: 404 }
-      );
+    let company;
+    try {
+      company = await db.companies.findById(contractor.companyId);
+      if (!company) {
+        console.error("Company not found for contractor:", contractor.id);
+        return NextResponse.json(
+          { message: "Company not found" },
+          { status: 404 }
+        );
+      }
+    } catch (dbError: any) {
+      console.error("Database error fetching company:", dbError);
+      throw new Error(`Database error: ${dbError.message}`);
     }
 
     // Get tier configuration
@@ -65,69 +105,103 @@ export async function POST(request: Request) {
     let customerId = company.subscriptionStripeCustomerId;
 
     if (!customerId) {
-      // Create Stripe customer
-      const customer = await stripe.customers.create({
-        email: contractor.email,
-        name: contractor.name,
-        metadata: {
-          companyId: company.id,
-          contractorId: contractor.id,
-        },
-      });
-      customerId = customer.id;
+      try {
+        console.log("Creating Stripe customer for:", contractor.email);
+        // Create Stripe customer
+        const customer = await stripe.customers.create({
+          email: contractor.email,
+          name: contractor.name || contractor.email,
+          metadata: {
+            companyId: company.id,
+            contractorId: contractor.id,
+          },
+        });
+        customerId = customer.id;
+        console.log("Stripe customer created:", customerId);
 
-      // Save customer ID to company
-      await db.companies.update(company.id, {
-        subscriptionStripeCustomerId: customerId,
-      });
+        // Save customer ID to company
+        try {
+          const updatedCompany = await db.companies.update(company.id, {
+            subscriptionStripeCustomerId: customerId,
+          });
+          if (!updatedCompany) {
+            console.error("Failed to update company with Stripe customer ID");
+            // Don't throw - we have the customer ID and can continue
+            // The webhook will handle updating the company later
+          } else {
+            console.log("Company updated with Stripe customer ID");
+          }
+        } catch (dbUpdateError: any) {
+          console.error("Database update error after creating Stripe customer:", dbUpdateError);
+          // Log the error but continue - we have the customer ID and can proceed
+          // The webhook will handle the update when subscription is created
+          console.log("Continuing despite database update error - customer ID:", customerId);
+        }
+      } catch (stripeError: any) {
+        console.error("Stripe customer creation error:", stripeError);
+        const errorMessage = stripeError.message || stripeError.toString() || "Unknown error";
+        throw new Error(`Failed to create Stripe customer: ${errorMessage}`);
+      }
+    } else {
+      console.log("Using existing Stripe customer:", customerId);
     }
 
     // Get Price ID from environment or use dynamic creation
     const priceId = process.env[`STRIPE_${tier.toUpperCase()}_PRICE_ID`];
 
+    // Build subscription_data with metadata
+    const subscriptionData: any = {
+      metadata: {
+        companyId: company.id,
+        contractorId: contractor.id,
+        tier: tier,
+      },
+    };
+
+    // Build line items
+    const lineItems: any[] = [];
+    if (priceId) {
+      console.log("Using pre-created price ID:", priceId);
+      lineItems.push({
+        price: priceId,
+        quantity: 1,
+      });
+    } else {
+      console.log("Creating dynamic price for tier:", tier, "price:", tierConfig.price);
+      lineItems.push({
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `${tierConfig.name} Plan`,
+            description: `Pay2Start ${tierConfig.name} subscription`,
+          },
+          unit_amount: tierConfig.price * 100, // Convert to cents
+          recurring: {
+            interval: "month",
+          },
+        },
+        quantity: 1,
+      });
+    }
+
     // Create Stripe Checkout Session for subscription
+    console.log("Creating Stripe checkout session...");
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
       mode: "subscription",
-      line_items: [
-        priceId
-          ? {
-              // Use pre-created price
-              price: priceId,
-              quantity: 1,
-            }
-          : {
-              // Fallback to dynamic price creation
-              price_data: {
-                currency: "usd",
-                product_data: {
-                  name: `${tierConfig.name} Plan`,
-                  description: `Pay2Start ${tierConfig.name} subscription`,
-                },
-                unit_amount: tierConfig.price * 100, // Convert to cents
-                recurring: {
-                  interval: "month",
-                },
-              },
-              quantity: 1,
-            },
-      ],
-      subscription_data: {
-        metadata: {
-          companyId: company.id,
-          contractorId: contractor.id,
-          tier: tier,
-        },
-      },
+      line_items: lineItems,
+      subscription_data: subscriptionData,
       success_url: `${baseUrl}/dashboard?subscription=success`,
       cancel_url: `${baseUrl}/pricing?subscription=cancelled`,
+      locale: "en", // Set locale to English to avoid localization errors
       metadata: {
         companyId: company.id,
         contractorId: contractor.id,
         tier: tier,
       },
     });
+    console.log("Checkout session created:", session.id);
 
     return NextResponse.json({
       sessionId: session.id,
@@ -135,8 +209,23 @@ export async function POST(request: Request) {
     });
   } catch (error: any) {
     console.error("Error creating subscription checkout:", error);
+    console.error("Error details:", {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.statusCode,
+      raw: error.raw,
+      stack: error.stack,
+    });
     return NextResponse.json(
-      { message: error.message || "Internal server error" },
+      { 
+        message: error.message || "Internal server error",
+        details: process.env.NODE_ENV === "development" ? {
+          type: error.type,
+          code: error.code,
+          statusCode: error.statusCode,
+        } : undefined,
+      },
       { status: 500 }
     );
   }

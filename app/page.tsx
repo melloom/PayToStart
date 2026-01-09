@@ -861,7 +861,7 @@ export default function LandingPage() {
                 ))}
               </div>
               <p className="text-slate-300 mb-6 leading-relaxed text-[15px]">
-                &quot;{testimonial.content}&quot;
+                &ldquo;{testimonial.content}&rdquo;
               </p>
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold">

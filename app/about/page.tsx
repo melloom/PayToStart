@@ -82,8 +82,8 @@ export default function AboutPage() {
 
             <div className="bg-gradient-to-r from-indigo-900/30 to-purple-900/30 rounded-xl p-6 border-l-4 border-indigo-500 my-8">
               <p className="text-slate-200 font-medium italic">
-                &quot;Every feature in Pay2Start was built with one goal in mind: to make contractors&apos; lives easier. 
-                Because when you&apos;re focused on your craft, you shouldn&apos;t have to worry about paperwork.&quot;
+                &ldquo;Every feature in Pay2Start was built with one goal in mind: to make contractors&apos; lives easier. 
+                Because when you&apos;re focused on your craft, you shouldn&apos;t have to worry about paperwork.&rdquo;
               </p>
               <p className="text-right mt-4 text-slate-400">— Melvin Peralta</p>
             </div>

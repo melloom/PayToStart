@@ -93,6 +93,7 @@ export interface Company {
   trialStart?: Date;
   trialEnd?: Date;
   trialTier?: SubscriptionTier;
+  planSelected?: boolean; // Tracks if user has explicitly selected a plan
   createdAt: Date;
   updatedAt: Date;
 }

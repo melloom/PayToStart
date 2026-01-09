@@ -470,15 +470,28 @@ export const db = {
 
   companies: {
     async findById(id: string): Promise<Company | null> {
-      const supabase = await createClient();
-      const { data, error } = await supabase
-        .from("companies")
-        .select("*")
-        .eq("id", id)
-        .single();
+      try {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from("companies")
+          .select("*")
+          .eq("id", id)
+          .single();
 
-      if (error || !data) return null;
-      return mapCompanyFromDb(data);
+        if (error) {
+          console.error("Database error in companies.findById:", error);
+          return null;
+        }
+        
+        if (!data) {
+          return null;
+        }
+        
+        return mapCompanyFromDb(data);
+      } catch (err: any) {
+        console.error("Exception in companies.findById:", err);
+        throw err;
+      }
     },
 
     async findByStripeSubscriptionId(subscriptionId: string): Promise<Company | null> {
@@ -494,29 +507,50 @@ export const db = {
     },
 
     async update(id: string, data: Partial<Company>): Promise<Company | null> {
-      const supabase = await createClient();
-      const updateData: any = {};
+      try {
+        const supabase = await createClient();
+        const updateData: any = {};
 
-      if (data.subscriptionTier !== undefined) updateData.subscription_tier = data.subscriptionTier;
-      if (data.subscriptionStripeSubscriptionId !== undefined) updateData.subscription_stripe_subscription_id = data.subscriptionStripeSubscriptionId;
-      if (data.subscriptionStripeCustomerId !== undefined) updateData.subscription_stripe_customer_id = data.subscriptionStripeCustomerId;
-      if (data.subscriptionCurrentPeriodStart !== undefined) updateData.subscription_current_period_start = data.subscriptionCurrentPeriodStart;
-      if (data.subscriptionCurrentPeriodEnd !== undefined) updateData.subscription_current_period_end = data.subscriptionCurrentPeriodEnd;
-      if (data.subscriptionStatus !== undefined) updateData.subscription_status = data.subscriptionStatus;
-      if (data.subscriptionCancelAtPeriodEnd !== undefined) updateData.subscription_cancel_at_period_end = data.subscriptionCancelAtPeriodEnd;
-      if (data.trialStart !== undefined) updateData.trial_start = data.trialStart;
-      if (data.trialEnd !== undefined) updateData.trial_end = data.trialEnd;
-      if (data.trialTier !== undefined) updateData.trial_tier = data.trialTier;
+        if (data.subscriptionTier !== undefined) updateData.subscription_tier = data.subscriptionTier;
+        if (data.subscriptionStripeSubscriptionId !== undefined) updateData.subscription_stripe_subscription_id = data.subscriptionStripeSubscriptionId;
+        if (data.subscriptionStripeCustomerId !== undefined) updateData.subscription_stripe_customer_id = data.subscriptionStripeCustomerId;
+        if (data.subscriptionCurrentPeriodStart !== undefined) updateData.subscription_current_period_start = data.subscriptionCurrentPeriodStart?.toISOString();
+        if (data.subscriptionCurrentPeriodEnd !== undefined) updateData.subscription_current_period_end = data.subscriptionCurrentPeriodEnd?.toISOString();
+        if (data.subscriptionStatus !== undefined) updateData.subscription_status = data.subscriptionStatus;
+        if (data.subscriptionCancelAtPeriodEnd !== undefined) updateData.subscription_cancel_at_period_end = data.subscriptionCancelAtPeriodEnd;
+        if (data.trialStart !== undefined) updateData.trial_start = data.trialStart?.toISOString();
+        if (data.trialEnd !== undefined) updateData.trial_end = data.trialEnd?.toISOString();
+        if (data.trialTier !== undefined) updateData.trial_tier = data.trialTier;
+        if (data.planSelected !== undefined) updateData.plan_selected = data.planSelected;
 
-      const { data: company, error } = await supabase
-        .from("companies")
-        .update(updateData)
-        .eq("id", id)
-        .select()
-        .single();
+        // Check if there's anything to update
+        if (Object.keys(updateData).length === 0) {
+          console.warn("No update data provided for company update");
+          return this.findById(id);
+        }
 
-      if (error) throw error;
-      return company ? mapCompanyFromDb(company) : null;
+        const { data: company, error } = await supabase
+          .from("companies")
+          .update(updateData)
+          .eq("id", id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Database error updating company:", error);
+          throw new Error(`Database update failed: ${error.message || JSON.stringify(error)}`);
+        }
+
+        if (!company) {
+          console.error("Company update returned no data for id:", id);
+          return null;
+        }
+
+        return mapCompanyFromDb(company);
+      } catch (err: any) {
+        console.error("Exception in companies.update:", err);
+        throw err;
+      }
     },
   },
 
@@ -677,6 +711,7 @@ function mapCompanyFromDb(row: any): Company {
     trialStart: row.trial_start ? new Date(row.trial_start) : undefined,
     trialEnd: row.trial_end ? new Date(row.trial_end) : undefined,
     trialTier: row.trial_tier || undefined,
+    planSelected: row.plan_selected || false,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };

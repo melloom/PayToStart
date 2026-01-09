@@ -8,15 +8,14 @@ import { Check, CheckCircle2, ArrowLeft, Zap, Shield, CreditCard } from "lucide-
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/use-toast";
 import { TIER_CONFIG } from "@/lib/types";
-import { PublicNav } from "@/components/navigation/public-nav";
 
 // Pricing tiers - synced with TIER_CONFIG in lib/types.ts
 const TIERS = [
   {
     id: "free" as const,
-    name: "Free",
+    name: "Basic",
     price: TIER_CONFIG.free.price,
-    description: "Perfect for trying out the platform",
+    description: "Free plan with basic features",
     features: [
       "No contracts",
       "No templates",
@@ -26,6 +25,7 @@ const TIERS = [
     limits: TIER_CONFIG.free.limits,
     cta: "Current Plan",
     popular: false,
+    hasTrial: false,
   },
   {
     id: "starter" as const,
@@ -33,15 +33,17 @@ const TIERS = [
     price: TIER_CONFIG.starter.price,
     description: "For small contractors getting started",
     features: [
-      "2 Templates",
-      "20 Contracts/month",
+      "7-Day Free Trial included",
+      "2 Contract Templates",
+      "20 Contracts per month",
       "Click to Sign",
       "Email Delivery",
       "Basic Support",
     ],
     limits: TIER_CONFIG.starter.limits,
-    cta: "Get Started",
-    popular: false,
+    cta: "Choose Plan",
+    popular: true,
+    hasTrial: true,
   },
   {
     id: "pro" as const,
@@ -49,9 +51,10 @@ const TIERS = [
     price: TIER_CONFIG.pro.price,
     description: "For growing businesses",
     features: [
+      "7-Day Free Trial included",
+      "Everything in Starter, plus:",
       "Unlimited Templates",
       "Unlimited Contracts",
-      "All Starter Features",
       "SMS Reminders",
       "File Attachments",
       "Custom Branding",
@@ -59,8 +62,9 @@ const TIERS = [
       "Priority Support",
     ],
     limits: TIER_CONFIG.pro.limits,
-    cta: "Upgrade to Pro",
-    popular: true,
+    cta: "Choose Plan",
+    popular: false,
+    hasTrial: true,
   },
   {
     id: "premium" as const,
@@ -68,7 +72,8 @@ const TIERS = [
     price: TIER_CONFIG.premium.price,
     description: "For large teams and enterprises",
     features: [
-      "All Pro Features",
+      "7-Day Free Trial included",
+      "Everything in Pro, plus:",
       "Dropbox Sign Integration",
       "DocuSign Integration",
       "Multi-user Team Roles",
@@ -77,8 +82,9 @@ const TIERS = [
       "Custom Integrations",
     ],
     limits: TIER_CONFIG.premium.limits,
-    cta: "Contact Sales",
+    cta: "Choose Plan",
     popular: false,
+    hasTrial: true,
   },
 ];
 
@@ -104,6 +110,17 @@ export default function PricingPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        // If unauthorized, redirect to login
+        if (response.status === 401) {
+          toast({
+            title: "Authentication required",
+            description: "Please log in to subscribe to a plan.",
+            variant: "destructive",
+          });
+          router.push("/login");
+          setLoading(null);
+          return;
+        }
         throw new Error(data.message || "Failed to create subscription");
       }
 
@@ -124,10 +141,7 @@ export default function PricingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900">
-      {/* Navigation */}
-      <PublicNav />
-
+    <>
       {/* Hero Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div className="text-center">
@@ -136,8 +150,7 @@ export default function PricingPage() {
             <span className="text-indigo-400"> Pricing</span>
           </h1>
           <p className="mt-6 text-lg leading-8 text-slate-400 max-w-2xl mx-auto">
-            Choose the perfect plan for your business. All plans include a 7-day free trial to get started.
-            Cancel anytime.
+            Choose the perfect plan for your business. All paid plans include a 7-day free trial. Cancel anytime.
           </p>
         </div>
       </section>
@@ -148,22 +161,30 @@ export default function PricingPage() {
           {TIERS.map((tier) => (
             <Card
               key={tier.id}
-              className={`relative transition-all duration-300 cursor-pointer hover:shadow-xl hover:-translate-y-1 hover:border-primary/50 ${
+              className={`relative transition-all duration-300 ${
                 tier.popular
-                  ? "border-primary border-2 shadow-lg scale-105 hover:scale-110"
-                  : "border hover:border-primary/30"
+                  ? "border-primary border-2 shadow-lg scale-105"
+                  : "border"
               }`}
             >
-              {tier.popular && (
-                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
-                  <span className="bg-primary text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md">
-                    Most Popular
-                  </span>
-                </div>
-              )}
               <CardHeader>
-                <CardTitle className="text-2xl text-white group-hover:text-indigo-400 transition-colors">{tier.name}</CardTitle>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <CardTitle className="text-2xl text-white">{tier.name}</CardTitle>
+                  {tier.popular && (
+                    <span className="bg-primary text-white px-3 py-1 rounded-full text-xs font-semibold shadow-md whitespace-nowrap">
+                      Most Popular
+                    </span>
+                  )}
+                </div>
                 <CardDescription className="text-slate-400">{tier.description}</CardDescription>
+                {tier.hasTrial && (
+                  <div className="mt-3 mb-2">
+                    <span className="inline-flex items-center gap-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-md">
+                      <Zap className="h-3 w-3" />
+                      7-Day Free Trial
+                    </span>
+                  </div>
+                )}
                 <div className="mt-4">
                   <span className="text-4xl font-bold text-white">${tier.price}</span>
                   <span className="text-slate-400 ml-1">/month</span>
@@ -171,12 +192,19 @@ export default function PricingPage() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-3 mb-6">
-                  {tier.features.map((feature, index) => (
-                    <li key={index} className="flex items-start gap-2">
-                      <CheckCircle2 className="h-5 w-5 text-green-400 mt-0.5 flex-shrink-0" />
-                      <span className="text-sm text-slate-300 font-medium">{feature}</span>
-                    </li>
-                  ))}
+                  {tier.features.map((feature, index) => {
+                    const isUpgradeHeader = feature.startsWith("Everything in");
+                    return (
+                      <li key={index} className="flex items-start gap-2">
+                        {!isUpgradeHeader && (
+                          <CheckCircle2 className="h-5 w-5 text-green-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        <span className={`text-sm font-medium ${isUpgradeHeader ? "text-indigo-400 font-bold italic" : "text-slate-300"}`}>
+                          {feature}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <Button
                   className="w-full"
@@ -331,7 +359,7 @@ export default function PricingPage() {
           </Link>
         </div>
       </section>
-    </div>
+    </>
   );
 }
 

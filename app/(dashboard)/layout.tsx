@@ -6,6 +6,7 @@ import { FileText, LogOut, Plus, Clock } from "lucide-react";
 import type { Metadata } from "next";
 import { getTrialInfo } from "@/lib/subscriptions";
 import { db } from "@/lib/db";
+import { headers } from "next/headers";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -25,6 +26,29 @@ export default async function DashboardLayout({
 
   if (!contractor) {
     redirect("/login");
+  }
+
+  // Check if we're already on the select-plan page to avoid redirect loops
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") || "";
+  const isSelectPlanPage = pathname === "/dashboard/select-plan";
+
+  // Check if user has selected a plan - MUST be explicitly true to access dashboard
+  // Skip plan check if we're already on the select-plan page to prevent loops
+  if (!isSelectPlanPage) {
+    try {
+      const company = await db.companies.findById(contractor.companyId);
+      // Redirect if company not found OR plan not explicitly selected (planSelected !== true)
+      if (!company || company.planSelected !== true) {
+        // Redirect to plan selection if they haven't selected a plan yet
+        redirect("/dashboard/select-plan");
+      }
+    } catch (error) {
+      console.error("Error fetching company for plan check:", error);
+      // If we can't fetch company, redirect to plan selection for security
+      // This ensures plan selection is required even if there's a database error
+      redirect("/dashboard/select-plan");
+    }
   }
 
   // Get trial information

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { stripe, STRIPE_MODE } from "@/lib/stripe";
 import { processCompletedCheckoutSession, isPaymentProcessed } from "@/lib/payments";
 import { finalizeContract } from "@/lib/finalization";
 import { db } from "@/lib/db";
@@ -7,7 +7,11 @@ import { headers } from "next/headers";
 import Stripe from "stripe";
 import type { SubscriptionTier } from "@/lib/types";
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+// Get webhook secret based on mode
+const isTestMode = STRIPE_MODE === "test";
+const webhookSecret = isTestMode
+  ? process.env.STRIPE_TEST_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!
+  : process.env.STRIPE_LIVE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(request: Request) {
   const body = await request.text();
@@ -59,17 +63,24 @@ export async function POST(request: Request) {
         const company = await db.companies.findById(companyId);
         
         if (company) {
+          // If subscription is in trial, keep the trial tier active
+          // The subscription tier will be activated when trial ends
+          const isInTrial = subscription.status === "trialing" || 
+            (company.trialEnd && new Date(company.trialEnd) > new Date());
+          
           await db.companies.update(company.id, {
-            subscriptionTier: tier,
+            // Only update subscription tier if subscription is active (not trialing)
+            subscriptionTier: subscription.status === "active" ? tier : company.subscriptionTier,
             subscriptionStripeSubscriptionId: subscription.id,
             subscriptionStripeCustomerId: subscription.customer as string,
             subscriptionStatus: subscription.status,
             subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
             subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
             subscriptionCancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+            planSelected: true, // Mark that user has selected a plan (via Stripe subscription)
           });
 
-          console.log(`Subscription created for company ${company.id}: ${tier}`);
+          console.log(`Subscription created for company ${company.id}: ${tier}, status: ${subscription.status}, in trial: ${isInTrial}`);
         }
       }
     } catch (error: any) {
@@ -98,18 +109,30 @@ export async function POST(request: Request) {
         // Get subscription details from Stripe
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
+        // Get company to check trial status
+        const company = await db.companies.findById(companyId);
+        
+        // If subscription is in trial (status is "trialing"), keep trial tier active
+        // The subscription tier will be activated when trial ends and status becomes "active"
+        const isInTrial = subscription.status === "trialing" || 
+          (company?.trialEnd && new Date(company.trialEnd) > new Date());
+
         // Update company subscription
+        // If subscription is trialing, don't override the trial tier yet
+        // The tier will be set when subscription becomes active after trial
         await db.companies.update(companyId, {
-          subscriptionTier: tier,
+          // Only update subscription tier if subscription is active (not trialing)
+          subscriptionTier: subscription.status === "active" ? tier : company?.subscriptionTier || tier,
           subscriptionStripeSubscriptionId: subscriptionId,
           subscriptionStripeCustomerId: subscription.customer as string,
           subscriptionStatus: subscription.status,
           subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
           subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
           subscriptionCancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+          planSelected: true, // Mark that user has selected a plan (via Stripe checkout)
         });
 
-        console.log(`Subscription created for company ${companyId}: ${tier}`);
+        console.log(`Subscription created for company ${companyId}: ${tier}, status: ${subscription.status}, in trial: ${isInTrial}`);
         return NextResponse.json({ received: true });
       }
 
@@ -252,15 +275,29 @@ export async function POST(request: Request) {
       if (company) {
         const tier = subscription.metadata?.tier as SubscriptionTier;
         
+        // When subscription transitions from trialing to active, activate the subscription tier
+        // This happens when the trial period ends
+        const wasTrialing = company.subscriptionStatus === "trialing";
+        const isNowActive = subscription.status === "active";
+        
+        // If trial just ended and subscription is now active, update to the subscription tier
+        const shouldUpdateTier = wasTrialing && isNowActive && tier;
+        
         await db.companies.update(company.id, {
           subscriptionStatus: subscription.status,
           subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
           subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
           subscriptionCancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-          subscriptionTier: tier || company.subscriptionTier,
+          // Update tier when trial ends and subscription becomes active
+          subscriptionTier: shouldUpdateTier ? tier : (tier || company.subscriptionTier),
+          planSelected: true, // Ensure plan is marked as selected
         });
 
-        console.log(`Subscription updated for company ${company.id}`);
+        if (shouldUpdateTier) {
+          console.log(`Trial ended for company ${company.id}, subscription tier ${tier} now active`);
+        } else {
+          console.log(`Subscription updated for company ${company.id}, status: ${subscription.status}`);
+        }
       }
     } catch (error: any) {
       console.error("Error processing subscription update:", error);

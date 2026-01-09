@@ -100,8 +100,8 @@ export async function signUp(email: string, password: string, metadata?: { name?
     return { error: error.message };
   }
 
-  // Check if user was created but trigger failed
-  // Wait a moment for trigger to complete, then check if company exists
+  // Check if user was created; best-effort verification that the contractor row exists.
+  // This should NEVER block signup – we only log if something looks wrong.
   if (data.user) {
     try {
       // Small delay to allow trigger to complete
@@ -115,8 +115,7 @@ export async function signUp(email: string, password: string, metadata?: { name?
         .single();
       
       if (contractorError || !contractorData) {
-        console.error("Contractor not found after signup:", contractorError);
-        return { error: "Database error saving new user" };
+        console.error("Contractor not found after signup (non-fatal):", contractorError);
       }
     } catch (err) {
       console.error("Error verifying contractor creation:", err);
