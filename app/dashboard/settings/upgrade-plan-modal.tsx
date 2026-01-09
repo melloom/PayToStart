@@ -21,12 +21,14 @@ interface UpgradePlanModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentTier: SubscriptionTier;
+  hasUsedTrial: boolean; // Whether user has already used their free trial
 }
 
 export default function UpgradePlanModal({
   open,
   onOpenChange,
   currentTier,
+  hasUsedTrial,
 }: UpgradePlanModalProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -35,6 +37,53 @@ export default function UpgradePlanModal({
   const tiers: SubscriptionTier[] = ["free", "starter", "pro", "premium"];
   const currentTierIndex = tiers.indexOf(currentTier);
   const availableTiers = tiers.slice(currentTierIndex + 1); // Only show tiers above current
+
+  const getFeatures = (tier: SubscriptionTier, hasUsedTrial: boolean): string[] => {
+      const baseFeatures: Record<SubscriptionTier, string[]> = {
+        free: ["3 Contracts (lifetime)", "No templates", "Basic features"],
+        starter: [
+          "7-Day Free Trial included",
+          "2 Contract Templates",
+          "20 Contracts per month",
+          "Click to Sign",
+          "Email Delivery",
+          "Basic Support",
+        ],
+        pro: [
+          "7-Day Free Trial included",
+          "Everything in Starter, plus:",
+          "Unlimited Templates",
+          "Unlimited Contracts",
+          "SMS Reminders",
+          "File Attachments",
+          "Custom Branding",
+          "Download All Contracts",
+          "Priority Support",
+        ],
+        premium: [
+          "7-Day Free Trial included",
+          "Everything in Pro, plus:",
+          "Dropbox Sign Integration",
+          "DocuSign Integration",
+          "Multi-user Team Roles",
+          "Stripe Connect Payouts",
+          "Dedicated Support",
+          "Custom Integrations",
+        ],
+      };
+
+      const features = [...baseFeatures[tier]];
+      
+      // Remove "7-Day Free Trial included" if they've already used a trial
+      if (hasUsedTrial && tier !== "free") {
+        const trialIndex = features.findIndex(f => f.includes("7-Day Free Trial"));
+        if (trialIndex !== -1) {
+          features.splice(trialIndex, 1);
+        }
+      }
+
+      return features;
+    };
 
   const getTierInfo = (tier: SubscriptionTier) => {
     const config = TIER_CONFIG[tier];
@@ -45,43 +94,9 @@ export default function UpgradePlanModal({
       premium: "Premium",
     };
 
-    const features: Record<SubscriptionTier, string[]> = {
-      free: ["3 Contracts (lifetime)", "No templates", "Basic features"],
-      starter: [
-        "7-Day Free Trial included",
-        "2 Contract Templates",
-        "20 Contracts per month",
-        "Click to Sign",
-        "Email Delivery",
-        "Basic Support",
-      ],
-      pro: [
-        "7-Day Free Trial included",
-        "Everything in Starter, plus:",
-        "Unlimited Templates",
-        "Unlimited Contracts",
-        "SMS Reminders",
-        "File Attachments",
-        "Custom Branding",
-        "Download All Contracts",
-        "Priority Support",
-      ],
-      premium: [
-        "7-Day Free Trial included",
-        "Everything in Pro, plus:",
-        "Dropbox Sign Integration",
-        "DocuSign Integration",
-        "Multi-user Team Roles",
-        "Stripe Connect Payouts",
-        "Dedicated Support",
-        "Custom Integrations",
-      ],
-    };
-
     return {
       name: names[tier],
       price: config.price,
-      features: features[tier],
       popular: tier === "starter",
       hasTrial: tier !== "free",
     };
@@ -185,7 +200,11 @@ export default function UpgradePlanModal({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
           {availableTiers.map((tier) => {
             const tierInfo = getTierInfo(tier);
-            const hasBadges = tierInfo.popular || tierInfo.hasTrial;
+            // Only show trial badge if they haven't used a trial before
+            const showTrialBadge = tierInfo.hasTrial && !hasUsedTrial;
+            const hasBadges = tierInfo.popular || showTrialBadge;
+            // Get features without trial text if they've used trial
+            const features = getFeatures(tier, hasUsedTrial);
             return (
               <Card
                 key={tier}
@@ -203,14 +222,14 @@ export default function UpgradePlanModal({
                         Most Popular
                       </span>
                     )}
-                    {tierInfo.hasTrial && (
+                    {showTrialBadge && (
                       <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold shadow-lg whitespace-nowrap">
                         7-Day Free Trial
                       </span>
                     )}
                   </div>
                 )}
-                <CardHeader className={hasBadges ? (tierInfo.popular && tierInfo.hasTrial ? "pt-12" : "pt-10") : "pt-4"}>
+                <CardHeader className={hasBadges ? (tierInfo.popular && showTrialBadge ? "pt-12" : "pt-10") : "pt-4"}>
                   <CardTitle className="text-xl text-white">{tierInfo.name}</CardTitle>
                   <CardDescription className="text-slate-400">
                     ${tierInfo.price}/month
@@ -218,7 +237,7 @@ export default function UpgradePlanModal({
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2 mb-4 min-h-[200px]">
-                    {tierInfo.features.map((feature, index) => {
+                    {features.map((feature, index) => {
                       const isUpgradeHeader = feature.startsWith("Everything in");
                       return (
                         <li key={index} className="flex items-start gap-2">
@@ -258,7 +277,9 @@ export default function UpgradePlanModal({
 
         <div className="mt-6 p-4 bg-slate-700/30 border border-slate-600 rounded-lg">
           <p className="text-sm text-slate-400 text-center">
-            All plans include a 7-day free trial. Cancel anytime. No credit card required for trial.
+            {hasUsedTrial
+              ? "Cancel anytime. Upgrade to unlock more features and higher limits."
+              : "All plans include a 7-day free trial. Cancel anytime. No credit card required for trial."}
           </p>
         </div>
       </DialogContent>
