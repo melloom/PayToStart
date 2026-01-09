@@ -551,12 +551,30 @@ export const db = {
 
         if (error) {
           console.error("Database error updating company:", error);
+          console.error("Error details:", {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+          });
+          
+          // Provide more helpful error message
+          if (error.code === "PGRST116" || error.message?.includes("JSON object")) {
+            throw new Error("Database update failed: No rows were updated. This may be due to missing RLS permissions. Please ensure the company update policy is set up correctly.");
+          }
+          
           throw new Error(`Database update failed: ${error.message || JSON.stringify(error)}`);
         }
 
         if (!company) {
           console.error("Company update returned no data for id:", id);
-          return null;
+          // Try to fetch the company to see if it exists
+          const existingCompany = await this.findById(id);
+          if (!existingCompany) {
+            throw new Error(`Company not found with id: ${id}`);
+          }
+          // If company exists but update returned no data, it might be an RLS issue
+          throw new Error("Database update failed: Update completed but no data returned. This may be due to RLS policies.");
         }
 
         return mapCompanyFromDb(company);
