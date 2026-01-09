@@ -88,8 +88,14 @@ export default function SelectPlanPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
 
   const handleSelectPlan = async (tierId: SubscriptionTier) => {
+    // Prevent multiple simultaneous calls
+    if (loading || redirecting) {
+      return;
+    }
+
     setLoading(tierId);
     try {
       if (tierId === "free") {
@@ -111,8 +117,15 @@ export default function SelectPlanPage() {
           description: "You've selected the Basic plan. You can upgrade anytime from your dashboard.",
         });
 
-        // Redirect to dashboard
-        router.push("/dashboard");
+        // Prevent multiple redirects
+        if (redirecting) return;
+        setRedirecting(true);
+
+        // Use replace instead of push to avoid history stack issues
+        // Add small delay to ensure database update propagates
+        setTimeout(() => {
+          router.replace("/dashboard");
+        }, 100);
       } else {
         // For paid plans, redirect to Stripe checkout
         const response = await fetch("/api/subscriptions/create-checkout", {
@@ -127,9 +140,13 @@ export default function SelectPlanPage() {
           throw new Error(data.message || "Failed to create subscription");
         }
 
-        // Redirect to Stripe Checkout
+        // Prevent multiple redirects
+        if (redirecting) return;
+        setRedirecting(true);
+
+        // Redirect to Stripe Checkout - use window.location.replace for external redirects
         if (data.url) {
-          window.location.href = data.url;
+          window.location.replace(data.url);
         } else {
           throw new Error("No checkout URL returned");
         }
@@ -141,6 +158,7 @@ export default function SelectPlanPage() {
         variant: "destructive",
       });
       setLoading(null);
+      setRedirecting(false);
     }
   };
 
