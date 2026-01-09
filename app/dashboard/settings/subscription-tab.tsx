@@ -1,13 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Check, X, CreditCard, Calendar, Zap, Shield, FileText } from "lucide-react";
-import Link from "next/link";
 import { format } from "date-fns";
 import ManageSubscription from "../subscription/manage-subscription";
 import SubscriptionActions from "../subscription/subscription-actions";
+import UpgradePlanModal from "./upgrade-plan-modal";
 import type { Company, SubscriptionTier } from "@/lib/types";
 import { TIER_CONFIG } from "@/lib/types";
 
@@ -42,6 +43,8 @@ export default function SubscriptionTab({
     return names[tier];
   };
 
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+
   const getStatusBadge = () => {
     if (currentTier === "free") {
       return <Badge className="bg-slate-700 text-slate-300 border-slate-600">Free Plan</Badge>;
@@ -59,6 +62,12 @@ export default function SubscriptionTab({
   };
 
   return (
+    <>
+      <UpgradePlanModal
+        open={upgradeModalOpen}
+        onOpenChange={setUpgradeModalOpen}
+        currentTier={currentTier}
+      />
     <div className="space-y-6">
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Current Plan Card */}
@@ -227,12 +236,13 @@ export default function SubscriptionTab({
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Link href="/pricing">
-                  <Button className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg font-semibold">
-                    View Plans
-                    <Zap className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
+                <Button
+                  onClick={() => setUpgradeModalOpen(true)}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg font-semibold"
+                >
+                  Upgrade Plan
+                  <Zap className="ml-2 h-4 w-4" />
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -262,6 +272,7 @@ export default function SubscriptionTab({
         </div>
       </div>
     </div>
+    </>
   );
 }
 
