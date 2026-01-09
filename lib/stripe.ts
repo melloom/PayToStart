@@ -23,6 +23,15 @@ function getStripeInstance(): Stripe {
     throw new Error(`${keyName} is not set in environment variables`);
   }
 
+  // Validate key format
+  if (isTestMode && !secretKey.startsWith("sk_test_")) {
+    throw new Error(`Invalid Stripe test key format. Test keys must start with 'sk_test_'. Current key starts with: ${secretKey.substring(0, 10)}...`);
+  }
+  
+  if (!isTestMode && !secretKey.startsWith("sk_live_")) {
+    throw new Error(`Invalid Stripe live key format. Live keys must start with 'sk_live_'. Current key starts with: ${secretKey.substring(0, 10)}...`);
+  }
+
   stripeInstance = new Stripe(secretKey, {
     apiVersion: "2023-10-16",
     typescript: true,

@@ -5,7 +5,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { ProgressBar } from "@/components/progress-bar";
 import { ScrollToTop } from "@/components/scroll-to-top";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: "swap", // Prevents font preload warning
+  preload: true,
+});
 
 export const metadata: Metadata = {
   title: {

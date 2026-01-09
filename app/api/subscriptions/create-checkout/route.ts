@@ -23,6 +23,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // Validate key format
+    if (isTestMode && !secretKey.startsWith("sk_test_")) {
+      console.error("Invalid test key format. Test keys must start with 'sk_test_'");
+      return NextResponse.json(
+        { message: "Invalid Stripe test key format" },
+        { status: 500 }
+      );
+    }
+    
+    if (!isTestMode && !secretKey.startsWith("sk_live_")) {
+      console.error("Invalid live key format. Live keys must start with 'sk_live_'");
+      return NextResponse.json(
+        { message: "Invalid Stripe live key format" },
+        { status: 500 }
+      );
+    }
+
     console.log(`Using Stripe ${stripeMode.toUpperCase()} mode`);
 
     // Check authentication
