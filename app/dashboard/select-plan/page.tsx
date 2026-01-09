@@ -159,36 +159,41 @@ export default function SelectPlanPage() {
 
         {/* Pricing Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {TIERS.map((tier) => (
-            <Card
-              key={tier.id}
-              className={`relative transition-all duration-300 border-2 ${
-                tier.popular
-                  ? "border-indigo-500 shadow-xl scale-105 bg-slate-800"
-                  : "border-slate-700 bg-slate-800"
-              }`}
-            >
-              {/* Badges - positioned above card with proper spacing */}
-              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 z-10 flex flex-col gap-1.5 items-center">
-                {tier.popular && (
-                  <span className="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md whitespace-nowrap">
-                    Most Popular
-                  </span>
+          {TIERS.map((tier) => {
+            const hasBadges = tier.popular || tier.hasTrial;
+            const badgeCount = (tier.popular ? 1 : 0) + (tier.hasTrial ? 1 : 0);
+            return (
+              <Card
+                key={tier.id}
+                className={`relative transition-all duration-300 border-2 ${
+                  tier.popular
+                    ? "border-indigo-500 shadow-xl scale-105 bg-slate-800"
+                    : "border-slate-700 bg-slate-800"
+                }`}
+              >
+                {/* Badges - positioned above card with proper spacing */}
+                {hasBadges && (
+                  <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10 flex flex-col gap-2 items-center pointer-events-none">
+                    {tier.popular && (
+                      <span className="bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg whitespace-nowrap">
+                        Most Popular
+                      </span>
+                    )}
+                    {tier.hasTrial && (
+                      <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg whitespace-nowrap">
+                        7-Day Free Trial
+                      </span>
+                    )}
+                  </div>
                 )}
-                {tier.hasTrial && (
-                  <span className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-4 py-1 rounded-full text-sm font-semibold shadow-md whitespace-nowrap">
-                    7-Day Free Trial
-                  </span>
-                )}
-              </div>
-              <CardHeader className={tier.popular && tier.hasTrial ? "pt-8" : tier.popular || tier.hasTrial ? "pt-6" : "pt-4"}>
-                <CardTitle className="text-2xl text-white">{tier.name}</CardTitle>
-                <CardDescription className="text-slate-400">{tier.description}</CardDescription>
-                <div className="mt-4">
-                  <span className="text-4xl font-bold text-white">${tier.price}</span>
-                  <span className="text-slate-400 ml-1">/month</span>
-                </div>
-              </CardHeader>
+                <CardHeader className={hasBadges ? (badgeCount === 2 ? "pt-12" : "pt-10") : "pt-4"}>
+                  <CardTitle className="text-2xl text-white">{tier.name}</CardTitle>
+                  <CardDescription className="text-slate-400">{tier.description}</CardDescription>
+                  <div className="mt-4">
+                    <span className="text-4xl font-bold text-white">${tier.price}</span>
+                    <span className="text-slate-400 ml-1">/month</span>
+                  </div>
+                </CardHeader>
               <CardContent>
                 <ul className="space-y-3 mb-6">
                   {tier.features.map((feature, index) => {
