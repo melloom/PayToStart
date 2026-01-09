@@ -58,6 +58,11 @@ export default async function DashboardLayout({
   // Get trial information
   const trialInfo = await getTrialInfo(contractor.companyId);
 
+  // If on select-plan page, don't render the dashboard navigation (let select-plan layout handle it)
+  if (isSelectPlanPage) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Trial Banner */}
