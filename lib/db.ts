@@ -83,6 +83,36 @@ export const db = {
       if (error) throw error;
       return mapContractorFromDb(contractor);
     },
+
+    async update(id: string, data: Partial<{ name: string; email: string }>): Promise<Contractor | null> {
+      const supabase = await createClient();
+      const updateData: any = {};
+
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.email !== undefined) updateData.email = data.email;
+
+      if (Object.keys(updateData).length === 0) {
+        return this.findById(id);
+      }
+
+      const { data: contractor, error } = await supabase
+        .from("contractors")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Database error updating contractor:", error);
+        throw new Error(`Database update failed: ${error.message || JSON.stringify(error)}`);
+      }
+
+      if (!contractor) {
+        return null;
+      }
+
+      return mapContractorFromDb(contractor);
+    },
   },
 
   clients: {
