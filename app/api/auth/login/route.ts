@@ -8,6 +8,12 @@ const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+// Handle GET requests by redirecting to the login page
+export async function GET(request: Request) {
+  const url = new URL("/login", request.url);
+  return NextResponse.redirect(url);
+}
+
 export async function POST(request: Request) {
   try {
     // Rate limiting for login attempts

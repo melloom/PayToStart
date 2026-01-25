@@ -28,3 +28,5 @@ SELECT cron.schedule(
 -- SELECT cron.unschedule('expire-trials-hourly');
 
 
+
+

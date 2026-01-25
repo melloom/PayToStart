@@ -7,7 +7,18 @@ const nextConfig = {
       bodySizeLimit: '10mb',
     },
   },
-  // Security headers
+  // Webpack configuration to exclude isomorphic-dompurify from middleware bundle
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // Exclude isomorphic-dompurify from server-side bundles (middleware)
+      config.externals = config.externals || [];
+      config.externals.push({
+        'isomorphic-dompurify': 'commonjs isomorphic-dompurify',
+      });
+    }
+    return config;
+  },
+  // Security headers (CSP is handled in middleware to exclude /_next/ paths)
   async headers() {
     return [
       {
@@ -35,24 +46,11 @@ const nextConfig = {
           },
           {
             key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()'
+            value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
           },
           {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https: blob:",
-              "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co https://api.stripe.com https://*.stripe.com",
-              "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "frame-ancestors 'self'",
-              "upgrade-insecure-requests"
-            ].join('; ')
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload'
           }
         ]
       }

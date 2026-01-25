@@ -6,6 +6,12 @@
     "app/**/*.ts": {
       "includeFiles": ".next/server/app/**"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/notify-subscription-ending",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }
 

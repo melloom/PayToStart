@@ -180,6 +180,25 @@ export async function POST(request: Request) {
 
         // Get Price ID from environment or use dynamic creation
         const priceId = process.env[`STRIPE_${tier.toUpperCase()}_PRICE_ID`];
+        let validatedPriceId = priceId;
+        
+        // Validate price ID if provided
+        if (priceId) {
+          try {
+            const existingPrice = await stripe.prices.retrieve(priceId);
+            if (existingPrice && existingPrice.active) {
+              console.log("Using pre-created price ID:", priceId);
+              validatedPriceId = priceId;
+            } else {
+              console.warn("Price ID exists but is not active, will create dynamic price");
+              validatedPriceId = null;
+            }
+          } catch (error: any) {
+            console.warn(`Price ID ${priceId} not found or invalid: ${error.message}`);
+            console.log("Falling back to dynamic price creation");
+            validatedPriceId = null;
+          }
+        }
         
         // Create Stripe Checkout Session
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -203,10 +222,10 @@ export async function POST(request: Request) {
           payment_method_types: ["card"],
           mode: "subscription",
           line_items: [
-            priceId
+            validatedPriceId
               ? {
                   // Use pre-created price
-                  price: priceId,
+                  price: validatedPriceId,
                   quantity: 1,
                 }
               : {
@@ -226,7 +245,7 @@ export async function POST(request: Request) {
                 },
           ],
           subscription_data: subscriptionData,
-          success_url: `${baseUrl}/dashboard?subscription=success`,
+          success_url: `${baseUrl}/dashboard?subscription=success&tier=${tier}`,
           cancel_url: `${baseUrl}/signup?subscription=cancelled`,
           metadata: {
             companyId: company.id,

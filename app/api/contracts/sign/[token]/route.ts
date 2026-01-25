@@ -4,7 +4,8 @@ import { saveSignature, generateContractHash } from "@/lib/signature";
 import { createDepositCheckoutSession } from "@/lib/payments";
 import { hashToken, verifyToken, isTokenExpired, getRateLimitConfig } from "@/lib/security/tokens";
 import { sendEmail } from "@/lib/email";
-import { getSignedButUnpaidEmail } from "@/lib/email/templates";
+import { sendNotificationIfEnabled } from "@/lib/email/notifications";
+import { getSignedButUnpaidEmail, getContractSignedEmail } from "@/lib/email/templates";
 import { signingPayloadSchema } from "@/lib/validations";
 import { log } from "@/lib/logger";
 
@@ -254,14 +255,43 @@ export async function POST(
       );
     }
 
+    // Get contractor and client for notifications
+    const contractor = await db.contractors.findById(updatedContract.contractorId);
+    const client = await db.clients.findById(updatedContract.clientId);
+
+    // Send notification to contractor that contract was signed (check preferences)
+    if (contractor && client) {
+      try {
+        const { subject, html } = getContractSignedEmail({
+          contractTitle: updatedContract.title,
+          contractorName: contractor.name,
+          contractorEmail: contractor.email,
+          contractorCompany: contractor.companyName,
+          clientName: client.name,
+          clientEmail: client.email,
+          depositAmount: updatedContract.depositAmount,
+          totalAmount: updatedContract.totalAmount,
+        });
+
+        await sendNotificationIfEnabled(
+          contractor.id,
+          "contractSigned",
+          () => sendEmail({
+            to: contractor.email,
+            subject,
+            html,
+          })
+        );
+      } catch (emailError) {
+        log.error({ error: emailError }, "Error sending contract signed notification to contractor");
+        // Don't fail if email fails
+      }
+    }
+
     // If deposit is required, create Stripe Checkout session and send email
     let checkoutUrl: string | null = null;
-    if (updatedContract.depositAmount > 0) {
+    if (updatedContract.depositAmount > 0 && client && contractor) {
       try {
-        const client = await db.clients.findById(updatedContract.clientId);
-        const contractor = await db.contractors.findById(updatedContract.contractorId);
-        
-        if (client && contractor) {
           const checkoutSession = await createDepositCheckoutSession(
             updatedContract,
             client.email,
@@ -291,7 +321,6 @@ export async function POST(
           } catch (emailError) {
             log.error({ error: emailError }, "Error sending signed but unpaid email");
             // Don't fail if email fails
-          }
         }
       } catch (error: any) {
         log.error({ error: error.message }, "Error creating checkout session");

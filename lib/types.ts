@@ -98,6 +98,27 @@ export interface Company {
   updatedAt: Date;
 }
 
+export type PaymentProviderType = "stripe" | "venmo" | "cashapp" | "paypal" | "zelle" | "bank_transfer" | "other";
+export type PaymentProviderStatus = "pending" | "connected" | "disconnected" | "error";
+
+export interface PaymentProvider {
+  id: string;
+  companyId: string;
+  providerType: PaymentProviderType;
+  providerName: string;
+  status: PaymentProviderStatus;
+  isDefault: boolean;
+  connectionData: Record<string, any>;
+  stripeCustomerId?: string;
+  stripeAccountId?: string;
+  connectedAt?: Date;
+  disconnectedAt?: Date;
+  lastSyncedAt?: Date;
+  errorMessage?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface UsageCounter {
   id: string;
   companyId: string;
@@ -105,6 +126,40 @@ export interface UsageCounter {
   periodStart: Date;
   periodEnd: Date;
   count: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ContractDraft {
+  id: string;
+  contractorId: string;
+  companyId: string;
+  clientId?: string;
+  templateId?: string;
+  title: string;
+  content: string;
+  fieldValues: Record<string, string>;
+  customFields: Array<{
+    id: string;
+    label: string;
+    type: "text" | "textarea" | "date" | "number";
+    placeholder: string;
+    required: boolean;
+  }>;
+  depositAmount: number;
+  totalAmount: number;
+  metadata?: Record<string, any>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TemplateDraft {
+  id: string;
+  contractorId: string;
+  companyId: string;
+  name: string;
+  content: string;
+  fields: ContractField[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,6 +180,7 @@ export interface TierLimits {
     docusignIntegration: boolean;
     multiUserTeamRoles: boolean;
     stripeConnectPayouts: boolean;
+    aiContractGeneration: boolean; // AI content generation feature
   };
 }
 
@@ -148,6 +204,7 @@ export const TIER_CONFIG: Record<SubscriptionTier, { name: string; price: number
         docusignIntegration: false,
         multiUserTeamRoles: false,
         stripeConnectPayouts: false,
+        aiContractGeneration: false, // Free users cannot use AI
       },
     },
   },
@@ -169,6 +226,7 @@ export const TIER_CONFIG: Record<SubscriptionTier, { name: string; price: number
         docusignIntegration: false,
         multiUserTeamRoles: false,
         stripeConnectPayouts: false,
+        aiContractGeneration: true, // Starter and above can use AI
       },
     },
   },
@@ -190,6 +248,7 @@ export const TIER_CONFIG: Record<SubscriptionTier, { name: string; price: number
         docusignIntegration: false,
         multiUserTeamRoles: false,
         stripeConnectPayouts: false,
+        aiContractGeneration: true, // Pro and above can use AI
       },
     },
   },
@@ -211,6 +270,7 @@ export const TIER_CONFIG: Record<SubscriptionTier, { name: string; price: number
         docusignIntegration: true,
         multiUserTeamRoles: true,
         stripeConnectPayouts: true,
+        aiContractGeneration: true, // Premium can use AI
       },
     },
   },

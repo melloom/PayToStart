@@ -9,8 +9,10 @@ import { format } from "date-fns";
 import ManageSubscription from "../subscription/manage-subscription";
 import SubscriptionActions from "../subscription/subscription-actions";
 import UpgradePlanModal from "./upgrade-plan-modal";
+import SubscriptionCardInput from "./subscription-card-input";
 import type { Company, SubscriptionTier } from "@/lib/types";
 import { TIER_CONFIG } from "@/lib/types";
+import InvoiceHistory from "../subscription/invoice-history";
 
 interface SubscriptionTabProps {
   customerId: string | null | undefined;
@@ -44,9 +46,15 @@ export default function SubscriptionTab({
   };
 
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  
+  // Use effectiveTier if currentTier is "free" but user has an active subscription
+  // This handles cases where the database hasn't updated yet
+  const actualCurrentTier = (currentTier === "free" && isActive && effectiveTier !== "free") 
+    ? (effectiveTier as SubscriptionTier) 
+    : currentTier;
 
   const getStatusBadge = () => {
-    if (currentTier === "free") {
+    if (actualCurrentTier === "free") {
       return <Badge className="bg-slate-700 text-slate-300 border-slate-600">Free Plan</Badge>;
     }
 
@@ -61,13 +69,22 @@ export default function SubscriptionTab({
     return <Badge className="bg-green-900/50 text-green-300 border-green-700">Active</Badge>;
   };
 
+  // Determine if user has used trial or is currently in trial
+  // If trialEnd exists (past or future), they shouldn't get another trial
+  const isInTrial = company.trialEnd && new Date(company.trialEnd) > new Date();
+  const hasUsedTrialBefore = company.trialEnd && new Date(company.trialEnd) <= new Date();
+  const hasUsedTrial = !!company.trialEnd; // If trialEnd exists at all, they've used/are using a trial
+
   return (
     <>
       <UpgradePlanModal
         open={upgradeModalOpen}
         onOpenChange={setUpgradeModalOpen}
-        currentTier={currentTier}
-        hasUsedTrial={!!company.trialEnd} // If trialEnd exists, they've used a trial before
+        currentTier={actualCurrentTier}
+        hasUsedTrial={hasUsedTrial} // If trialEnd exists (past or future), no more trials
+        company={company}
+        customerId={customerId}
+        isActive={isActive} // Pass isActive to prevent upgrades when already subscribed
       />
     <div className="space-y-6">
       <div className="grid lg:grid-cols-3 gap-6">
@@ -109,23 +126,46 @@ export default function SubscriptionTab({
                 <div className="flex items-center justify-between p-6 bg-gradient-to-br from-indigo-600/20 via-purple-600/20 to-pink-600/20 border-2 border-indigo-500/30 rounded-xl backdrop-blur-sm">
                   <div>
                     <h3 className="text-3xl font-bold text-white mb-1">
-                      {getTierDisplayName(currentTier)}
+                      {getTierDisplayName(actualCurrentTier)}
                     </h3>
                     <p className="text-slate-300 mb-2">
-                      {TIER_CONFIG[currentTier].price === 0 ? "Free forever" : `$${TIER_CONFIG[currentTier].price}/month`}
+                      {TIER_CONFIG[actualCurrentTier].price === 0 ? "Free forever" : `$${TIER_CONFIG[actualCurrentTier].price}/month`}
                     </p>
-                    {company.subscriptionCurrentPeriodEnd && (
-                      <p className="text-sm text-slate-400">
-                        {company.subscriptionCancelAtPeriodEnd
-                          ? `Cancels on ${format(company.subscriptionCurrentPeriodEnd, "MMM d, yyyy")}`
-                          : `Renews on ${format(company.subscriptionCurrentPeriodEnd, "MMM d, yyyy")}`}
-                      </p>
-                    )}
+                    {(() => {
+                      // Check if in trial
+                      const isInTrial = company.trialEnd && new Date(company.trialEnd) > new Date();
+                      const trialEndDate = company.trialEnd ? new Date(company.trialEnd) : null;
+                      const periodEndDate = company.subscriptionCurrentPeriodEnd ? new Date(company.subscriptionCurrentPeriodEnd) : null;
+
+                      if (isInTrial && trialEndDate) {
+                        // Show trial end date and when they'll be charged
+                        return (
+                          <div className="space-y-1">
+                            <p className="text-sm text-amber-400">
+                              Trial ends: {format(trialEndDate, "MMM d, yyyy")}
+                            </p>
+                            <p className="text-sm text-slate-400">
+                              First charge: {format(trialEndDate, "MMM d, yyyy")}
+                            </p>
+                          </div>
+                        );
+                      } else if (periodEndDate) {
+                        // Show renewal date
+                        return (
+                          <p className="text-sm text-slate-400">
+                            {company.subscriptionCancelAtPeriodEnd
+                              ? `Cancels on ${format(periodEndDate, "MMM d, yyyy")}`
+                              : `Renews on ${format(periodEndDate, "MMM d, yyyy")}`}
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <div className="text-right">
-                    {currentTier !== "free" && (
+                    {actualCurrentTier !== "free" && (
                       <div className="text-4xl font-bold bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                        ${TIER_CONFIG[currentTier].price}
+                        ${TIER_CONFIG[actualCurrentTier].price}
                         <span className="text-lg text-slate-400">/mo</span>
                       </div>
                     )}
@@ -161,7 +201,9 @@ export default function SubscriptionTab({
                     </div>
                     <div className="p-4 bg-slate-700/50 border border-slate-600 rounded-lg backdrop-blur-sm">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-slate-300">Contracts per Month</span>
+                        <span className="text-sm font-medium text-slate-300">
+                          {actualCurrentTier === "free" ? "Contracts (lifetime)" : "Contracts per Month"}
+                        </span>
                         <FileText className="h-4 w-4 text-purple-400" />
                       </div>
                       <div className="flex items-baseline gap-2">
@@ -173,12 +215,16 @@ export default function SubscriptionTab({
                             ? "Unlimited"
                             : tierConfig.limits.contracts === 0
                             ? "Not included"
+                            : actualCurrentTier === "free"
+                            ? "contracts only"
                             : "contracts"}
                         </span>
                       </div>
                       {tierConfig.limits.contracts !== null && tierConfig.limits.contracts > 0 && (
                         <div className="mt-2 text-xs text-slate-400">
-                          Used this month: {contractsUsed} of {tierConfig.limits.contracts}
+                          {actualCurrentTier === "free" 
+                            ? `Used: ${contractsUsed} of ${tierConfig.limits.contracts} (lifetime)`
+                            : `Used this month: ${contractsUsed} of ${tierConfig.limits.contracts}`}
                         </div>
                       )}
                     </div>
@@ -189,21 +235,50 @@ export default function SubscriptionTab({
                 <div>
                   <h4 className="font-semibold text-white mb-4">Included Features</h4>
                   {(() => {
-                    const allFeatures = Object.entries(tierConfig.limits.features);
-                    const featureNames: Record<string, string> = {
-                      clickToSign: "Click to Sign",
-                      emailDelivery: "Email Delivery",
-                      smsReminders: "SMS Reminders",
-                      attachments: "File Attachments",
-                      customBranding: "Custom Branding",
-                      downloadAllContracts: "Download All Contracts",
-                      dropboxSignIntegration: "Dropbox Sign Integration",
-                      docusignIntegration: "DocuSign Integration",
-                      multiUserTeamRoles: "Multi-user Team Roles",
-                      stripeConnectPayouts: "Stripe Connect Payouts",
+                    // Get tier-specific features list
+                    const getTierFeatures = (tier: SubscriptionTier): string[] => {
+                      const baseFeatures: Record<SubscriptionTier, string[]> = {
+                        free: [
+                          "3 Contracts only (lifetime)",
+                          "No templates",
+                          "Basic features",
+                        ],
+                        starter: [
+                          "2 Contract Templates",
+                          "20 Contracts per month",
+                          "AI Contract Generation",
+                          "Click to Sign",
+                          "Email Delivery",
+                          "Basic Support",
+                        ],
+                        pro: [
+                          "Unlimited Templates",
+                          "Unlimited Contracts",
+                          "AI Contract Generation",
+                          "Click to Sign",
+                          "Email Delivery",
+                          "SMS Reminders",
+                          "File Attachments",
+                          "Custom Branding",
+                          "Download All Contracts",
+                          "Priority Support",
+                        ],
+                        premium: [
+                          "Everything in Pro, plus:",
+                          "Dropbox Sign Integration",
+                          "DocuSign Integration",
+                          "Multi-user Team Roles",
+                          "Stripe Connect Payouts",
+                          "Dedicated Support",
+                          "Custom Integrations",
+                        ],
+                      };
+                      return baseFeatures[tier] || [];
                     };
 
-                    if (allFeatures.length === 0) {
+                    const features = getTierFeatures(actualCurrentTier);
+
+                    if (features.length === 0) {
                       return (
                         <div className="p-4 bg-slate-700/30 border border-slate-600 rounded-lg">
                           <p className="text-sm text-slate-400 text-center">
@@ -215,38 +290,63 @@ export default function SubscriptionTab({
 
                     return (
                       <div className="grid md:grid-cols-2 gap-3">
-                        {allFeatures.map(([feature, enabled]) => (
-                          <div key={feature} className="flex items-center gap-2 text-sm">
-                            {enabled ? (
-                              <>
-                                <Check className="h-4 w-4 text-green-400 flex-shrink-0" />
-                                <span className="text-slate-300">{featureNames[feature] || feature}</span>
-                              </>
-                            ) : (
-                              <>
-                                <X className="h-4 w-4 text-slate-600 flex-shrink-0" />
-                                <span className="text-slate-500 line-through">{featureNames[feature] || feature}</span>
-                                <span className="text-xs text-slate-500 ml-1">(Not included)</span>
-                              </>
-                            )}
-                          </div>
-                        ))}
+                        {features.map((feature, index) => {
+                          const isUpgradeHeader = feature.startsWith("Everything in");
+                          return (
+                            <div key={index} className="flex items-center gap-2 text-sm">
+                              {!isUpgradeHeader ? (
+                                <>
+                                  <Check className="h-4 w-4 text-green-400 flex-shrink-0" />
+                                  <span className="text-slate-300">{feature}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Zap className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                                  <span className="text-indigo-400 font-semibold italic">{feature}</span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}
                 </div>
 
                 {/* Actions */}
-                <SubscriptionActions company={company} currentTier={currentTier} isActive={isActive} />
+                <SubscriptionActions company={company} currentTier={actualCurrentTier} isActive={isActive} />
               </div>
             </CardContent>
           </Card>
+
+          {/* Invoice History - Below Current Plan */}
+          {actualCurrentTier !== "free" && isActive && customerId && (
+            <InvoiceHistory customerId={customerId} />
+          )}
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Upgrade Plan Card - Show for free, starter, and pro tiers */}
-          {currentTier !== "premium" && (
+          {/* Subscribe/Upgrade Plan Card */}
+          {actualCurrentTier === "free" ? (
+            <Card className="border-2 border-indigo-500/30 shadow-xl bg-gradient-to-br from-indigo-600/20 via-purple-600/20 to-pink-600/20 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-xl font-bold text-white">Subscribe to a Plan</CardTitle>
+                <CardDescription className="text-slate-300">
+                  Unlock more features and higher limits
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  onClick={() => setUpgradeModalOpen(true)}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg font-semibold"
+                >
+                  Subscribe Now
+                  <Zap className="ml-2 h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+          ) : actualCurrentTier !== "premium" ? (
             <Card className="border-2 border-indigo-500/30 shadow-xl bg-gradient-to-br from-indigo-600/20 via-purple-600/20 to-pink-600/20 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="text-xl font-bold text-white">Upgrade Plan</CardTitle>
@@ -264,10 +364,16 @@ export default function SubscriptionTab({
                 </Button>
               </CardContent>
             </Card>
-          )}
+          ) : null}
+
+          {/* Payment Method Card - Show for all users */}
+          <SubscriptionCardInput
+            customerId={customerId}
+            hasActiveSubscription={actualCurrentTier !== "free" && isActive}
+          />
 
           {/* Manage Subscription - Only show for active paid subscriptions (not free tier) */}
-          {currentTier !== "free" && isActive && customerId && (
+          {actualCurrentTier !== "free" && isActive && customerId && (
             <ManageSubscription customerId={customerId} />
           )}
 

@@ -1,7 +1,7 @@
 import { updateSession } from "@/lib/supabase/middleware";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getClientIP } from "@/lib/security/api-security";
+import { getClientIP } from "@/lib/security/middleware-security";
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -20,22 +20,72 @@ export async function middleware(request: NextRequest) {
   // Security: Block suspicious requests early
   const userAgent = request.headers.get("user-agent") || "";
   const ip = getClientIP(request);
+  const url = request.nextUrl.pathname + request.nextUrl.search;
   
   // Block common attack patterns in user agent
-  const suspiciousPatterns = [
+  const suspiciousUserAgentPatterns = [
     /sqlmap/i,
     /nikto/i,
     /masscan/i,
     /nmap/i,
+    /burp/i,
+    /acunetix/i,
+    /nessus/i,
+    /openvas/i,
+    /w3af/i,
     /\.\./, // Path traversal
     /<script/i, // XSS attempts
   ];
   
-  const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(userAgent));
+  // Block suspicious patterns in URL
+  const suspiciousURLPatterns = [
+    /\.\./, // Path traversal
+    /\.\.%2F/i, // URL encoded path traversal
+    /\.\.%5C/i, // URL encoded backslash path traversal
+    /<script/i, // XSS attempts
+    /javascript:/i, // JavaScript protocol
+    /data:text\/html/i, // Data URI XSS
+    /union.*select/i, // SQL injection
+    /or.*1.*=.*1/i, // SQL injection
+    /exec\(/i, // Command injection
+    /system\(/i, // Command injection
+    /eval\(/i, // Code injection
+    /\.\.\/\.\.\/etc\/passwd/i, // Path traversal to sensitive files
+    /\.\.\/\.\.\/windows\/system32/i, // Windows path traversal
+    /phpinfo/i, // PHP info disclosure
+    /\.env/i, // Environment file access
+    /\.git/i, // Git directory access
+    /\.svn/i, // SVN directory access
+    /\.htaccess/i, // Apache config access
+    /wp-admin/i, // WordPress admin (if not using WordPress)
+    /wp-login/i, // WordPress login (if not using WordPress)
+    /\.\.\/\.\.\/\.\.\/\.\./i, // Multiple path traversals
+  ];
   
-  if (isSuspicious) {
-    console.warn(`[SECURITY] Suspicious request blocked: IP=${ip}, UA=${userAgent.substring(0, 100)}`);
+  const isSuspiciousUA = suspiciousUserAgentPatterns.some(pattern => pattern.test(userAgent));
+  const isSuspiciousURL = suspiciousURLPatterns.some(pattern => pattern.test(url));
+  
+  if (isSuspiciousUA || isSuspiciousURL) {
+    console.warn(`[SECURITY] Suspicious request blocked: IP=${ip}, UA=${userAgent.substring(0, 100)}, URL=${url.substring(0, 200)}`);
     return new NextResponse("Forbidden", { status: 403 });
+  }
+  
+  // Validate Origin header for API routes (CSRF protection)
+  if (pathname.startsWith("/api/") && ["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+    const origin = request.headers.get("origin");
+    const referer = request.headers.get("referer");
+    const host = request.headers.get("host");
+    
+    // In production, validate origin
+    if (process.env.NODE_ENV === "production" && host) {
+      const expectedOrigin = process.env.NEXT_PUBLIC_APP_URL || `https://${host}`;
+      
+      // Allow requests from same origin or no origin (same-origin requests)
+      if (origin && !origin.startsWith(expectedOrigin)) {
+        console.warn(`[SECURITY] Invalid origin blocked: IP=${ip}, Origin=${origin}, Expected=${expectedOrigin}`);
+        return new NextResponse("Forbidden", { status: 403 });
+      }
+    }
   }
   
   // Update Supabase session - this handles auth cookie management
@@ -60,6 +110,27 @@ export async function middleware(request: NextRequest) {
   headers.set("X-XSS-Protection", "1; mode=block");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  
+  // Content-Security-Policy (only for non-static paths)
+  const cspDirectives = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co https://api.stripe.com https://*.stripe.com",
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    "media-src 'self'",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    // Only upgrade to HTTPS in production, not in local development
+    ...(process.env.NODE_ENV === 'production' ? ["upgrade-insecure-requests"] : [])
+  ];
+  headers.set("Content-Security-Policy", cspDirectives.join('; '));
   
   // HSTS for HTTPS
   if (request.nextUrl.protocol === "https:") {

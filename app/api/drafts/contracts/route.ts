@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE - Delete a contract draft
+// DELETE - Delete a contract draft or all drafts
 export async function DELETE(request: NextRequest) {
   try {
     const contractor = await getCurrentContractor();
@@ -106,7 +106,15 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
+    const deleteAll = searchParams.get("all") === "true";
 
+    // Delete all drafts
+    if (deleteAll) {
+      const deletedCount = await db.contractDrafts.deleteAllByContractorId(contractor.id);
+      return NextResponse.json({ success: true, deletedCount });
+    }
+
+    // Delete single draft
     if (!id) {
       return NextResponse.json({ error: "Draft ID required" }, { status: 400 });
     }

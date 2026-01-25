@@ -102,13 +102,36 @@ export default async function SubscriptionPage() {
                       {getTierDisplayName(currentTier)}
                     </h3>
                     <p className="text-slate-300 mb-2">{TIER_CONFIG[currentTier].price === 0 ? "Free forever" : `$${TIER_CONFIG[currentTier].price}/month`}</p>
-                    {company.subscriptionCurrentPeriodEnd && (
-                      <p className="text-sm text-slate-400">
-                        {company.subscriptionCancelAtPeriodEnd
-                          ? `Cancels on ${format(company.subscriptionCurrentPeriodEnd, "MMM d, yyyy")}`
-                          : `Renews on ${format(company.subscriptionCurrentPeriodEnd, "MMM d, yyyy")}`}
-                      </p>
-                    )}
+                    {(() => {
+                      // Check if in trial
+                      const isInTrial = company.trialEnd && new Date(company.trialEnd) > new Date();
+                      const trialEndDate = company.trialEnd ? new Date(company.trialEnd) : null;
+                      const periodEndDate = company.subscriptionCurrentPeriodEnd ? new Date(company.subscriptionCurrentPeriodEnd) : null;
+
+                      if (isInTrial && trialEndDate) {
+                        // Show trial end date and when they'll be charged
+                        return (
+                          <div className="space-y-1">
+                            <p className="text-sm text-amber-400">
+                              Trial ends: {format(trialEndDate, "MMM d, yyyy")}
+                            </p>
+                            <p className="text-sm text-slate-400">
+                              First charge: {format(trialEndDate, "MMM d, yyyy")}
+                            </p>
+                          </div>
+                        );
+                      } else if (periodEndDate) {
+                        // Show renewal date
+                        return (
+                          <p className="text-sm text-slate-400">
+                            {company.subscriptionCancelAtPeriodEnd
+                              ? `Cancels on ${format(periodEndDate, "MMM d, yyyy")}`
+                              : `Renews on ${format(periodEndDate, "MMM d, yyyy")}`}
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <div className="text-right">
                     {currentTier !== "free" && (
@@ -145,7 +168,9 @@ export default async function SubscriptionPage() {
                     </div>
                     <div className="p-4 bg-slate-700/50 border border-slate-600 rounded-lg backdrop-blur-sm">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-slate-300">Contracts per Month</span>
+                        <span className="text-sm font-medium text-slate-300">
+                          {currentTier === "free" ? "Contracts (lifetime)" : "Contracts per Month"}
+                        </span>
                         <FileText className="h-4 w-4 text-purple-400" />
                       </div>
                       <div className="flex items-baseline gap-2">
@@ -153,12 +178,20 @@ export default async function SubscriptionPage() {
                           {tierConfig.limits.contracts === null ? "∞" : tierConfig.limits.contracts}
                         </span>
                         <span className="text-sm text-slate-400">
-                          {tierConfig.limits.contracts === null ? "Unlimited" : tierConfig.limits.contracts === 0 ? "Not included" : "contracts"}
+                          {tierConfig.limits.contracts === null 
+                            ? "Unlimited" 
+                            : tierConfig.limits.contracts === 0 
+                            ? "Not included" 
+                            : currentTier === "free"
+                            ? "contracts only"
+                            : "contracts"}
                         </span>
                       </div>
                       {tierConfig.limits.contracts !== null && tierConfig.limits.contracts > 0 && (
                         <div className="mt-2 text-xs text-slate-400">
-                          Used this month: {contractsUsed} of {tierConfig.limits.contracts}
+                          {currentTier === "free" 
+                            ? `Used: ${contractsUsed} of ${tierConfig.limits.contracts} (lifetime)`
+                            : `Used this month: ${contractsUsed} of ${tierConfig.limits.contracts}`}
                         </div>
                       )}
                     </div>

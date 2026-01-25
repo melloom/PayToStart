@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateToken, hashToken, getTokenExpiry } from "@/lib/security/tokens";
@@ -7,14 +7,29 @@ import { getContractLinkEmail } from "@/lib/email/templates";
 import { canPerformAction, incrementUsage } from "@/lib/subscriptions";
 import { contractCreateSchema } from "@/lib/validations";
 import { log } from "@/lib/logger";
-import { checkAPIRateLimit, sanitizeInput, sanitizeEmail, validateContentType, createSecureErrorResponse, getClientIP } from "@/lib/security/api-security";
+import {
+  checkAPIRateLimit,
+  sanitizeInput,
+  sanitizeEmail,
+  sanitizeHTML,
+  validateContentType,
+  createSecureErrorResponse,
+  validateRequestSecurity,
+  requireAuth,
+  validateUUID,
+} from "@/lib/security/api-security";
+import { sanitizePhoneNumber } from "@/lib/security/validation";
+import { createSecureResponse } from "@/lib/security/middleware-helpers";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const contractor = await getCurrentContractor();
-    if (!contractor) {
-      return NextResponse.json({ error: "Unauthorized", message: "Authentication required" }, { status: 401 });
+    // Authentication check
+    const authResult = await requireAuth();
+    if (authResult.response) {
+      return authResult.response;
     }
+
+    const contractor = authResult.contractor;
 
     // Rate limiting
     const rateLimitResponse = checkAPIRateLimit(request, `contracts:${contractor.id}`);
@@ -30,22 +45,49 @@ export async function POST(request: Request) {
 
     // Parse and validate request body
     const body = await request.json();
-    const validationResult = contractCreateSchema.safeParse(body);
     
+    // Check for injection attacks
+    const securityCheck = validateRequestSecurity(body);
+    if (!securityCheck.valid) {
+      log.warn({ errors: securityCheck.errors }, "Potential injection attack detected in contract creation");
+      return NextResponse.json(
+        { error: "Invalid input", message: "Request contains potentially dangerous content" },
+        { status: 400 }
+      );
+    }
+
+    // Validate with Zod schema
+    const validationResult = contractCreateSchema.safeParse(body);
     if (!validationResult.success) {
       log.warn({ errors: validationResult.error.errors }, "Contract creation validation failed");
       return NextResponse.json(
-        { 
+        {
           error: "Validation failed",
           message: "Please check your input and try again",
-          errors: validationResult.error.errors 
+          errors: validationResult.error.errors,
         },
         { status: 400 }
       );
     }
 
     const data = validationResult.data;
-    
+
+    // Validate UUID if clientId is provided
+    if (data.clientId && !validateUUID(data.clientId)) {
+      return NextResponse.json(
+        { error: "Invalid client ID format" },
+        { status: 400 }
+      );
+    }
+
+    // Validate UUID if templateId is provided
+    if (data.templateId && !validateUUID(data.templateId)) {
+      return NextResponse.json(
+        { error: "Invalid template ID format" },
+        { status: 400 }
+      );
+    }
+
     // Sanitize inputs
     const sanitizedEmail = sanitizeEmail(data.clientEmail);
     if (!sanitizedEmail) {
@@ -58,13 +100,11 @@ export async function POST(request: Request) {
     // Sanitize text inputs
     const clientName = sanitizeInput(data.clientName);
     const title = sanitizeInput(data.title);
-    const clientPhone = data.clientPhone ? sanitizeInput(data.clientPhone) : null;
+    const clientPhone = data.clientPhone ? sanitizePhoneNumber(data.clientPhone) : null;
     
-    const {
-      content,
-      depositAmount,
-      totalAmount,
-    } = data;
+    // Sanitize HTML content
+    const content = await sanitizeHTML(data.content, true); // Allow basic formatting for contract content
+    const { depositAmount, totalAmount } = data;
 
     // Check tier limit for contracts
     const canCreateContract = await canPerformAction(
@@ -181,7 +221,7 @@ export async function POST(request: Request) {
       depositAmount,
     }, "Contract created successfully");
 
-    return NextResponse.json({
+    return createSecureResponse({
       success: true,
       contract,
       signingUrl,

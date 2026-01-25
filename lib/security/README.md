@@ -22,6 +22,12 @@ This directory contains security utilities and configurations for Pay2Start.
 - **Body size validation**: Prevents large payload attacks
 - **Content type validation**: Ensures proper request format
 - **Secure error handling**: No information leakage in error messages
+- **XSS Protection**: DOMPurify integration for HTML sanitization
+- **SQL Injection Detection**: Pattern matching for SQL injection attempts
+- **Command Injection Detection**: Pattern matching for command injection attempts
+- **CSRF Protection**: Origin header validation for state-changing operations
+- **Path Traversal Protection**: Validates and sanitizes file paths
+- **UUID Validation**: Ensures UUIDs are properly formatted
 
 ### 4. Environment Validation (`env-validation.ts`)
 - **Required variable checks**: Validates all required env vars are set
@@ -29,9 +35,36 @@ This directory contains security utilities and configurations for Pay2Start.
 - **Secret validation**: Checks token secrets are properly configured
 
 ### 5. Middleware Security (`middleware.ts`)
-- **Suspicious request blocking**: Blocks known attack patterns
+- **Suspicious request blocking**: Blocks known attack patterns (SQL injection, XSS, path traversal, etc.)
 - **Security headers**: Adds security headers to all responses
 - **Session management**: Handles Supabase session securely
+- **CSRF validation**: Validates Origin header for API routes
+- **Enhanced attack pattern detection**: Detects 20+ common attack patterns
+
+### 6. Validation Utilities (`validation.ts`)
+- **UUID validation**: Ensures proper UUID format
+- **Email validation**: Strict email format checking
+- **Password strength**: Validates password complexity
+- **URL safety**: Validates URLs don't contain dangerous protocols
+- **File name sanitization**: Prevents path traversal in file names
+- **Phone number validation**: Sanitizes and validates phone numbers
+- **Base64 validation**: Validates base64 encoded strings
+- **JSON validation**: Validates JSON strings
+- **IP address validation**: Validates IPv4 and IPv6 addresses
+- **Domain validation**: Validates domain names
+- **Object sanitization**: Recursively sanitizes objects
+
+### 7. File Upload Security (`file-upload.ts`)
+- **File type validation**: Validates MIME types and extensions
+- **File size validation**: Prevents oversized file uploads
+- **Dangerous file detection**: Blocks executable files and scripts
+- **Image upload validation**: Specialized validation for images
+- **Document upload validation**: Specialized validation for documents
+
+### 8. Security Middleware Helpers (`middleware-helpers.ts`)
+- **Comprehensive security middleware**: Applies all security checks in one function
+- **Secure response creation**: Creates responses with security headers
+- **Request validation pipeline**: Validates requests before processing
 
 ## Security Headers
 
@@ -51,6 +84,10 @@ The application sets the following security headers on all responses:
 - Always use Zod schemas for validation
 - Sanitize user inputs before storing
 - Use `sanitizeInput()` and `sanitizeEmail()` utilities
+- Use `validateRequestSecurity()` to check for injection attacks
+- Use `sanitizeObject()` for complex nested objects
+- Validate UUIDs with `validateUUID()` before database queries
+- Use `sanitizeFilePath()` for file path inputs
 
 ### Error Handling
 - Use `createSecureErrorResponse()` for consistent error handling
@@ -83,6 +120,52 @@ Configure in `lib/security/tokens.ts`:
 - `RATE_LIMIT_WINDOW_MINUTES`: Time window (default: 15)
 - `MAX_ATTEMPTS_PER_WINDOW`: Max attempts (default: 5)
 
+## Security Features Implemented
+
+### Protection Against Common Attacks
+
+1. **SQL Injection**: 
+   - Supabase uses parameterized queries (automatic protection)
+   - Additional pattern detection in `containsSQLInjection()`
+   - Input sanitization removes SQL special characters
+
+2. **XSS (Cross-Site Scripting)**:
+   - DOMPurify integration for HTML sanitization
+   - Pattern detection in `containsXSS()`
+   - Input sanitization removes script tags and event handlers
+   - Content Security Policy headers
+
+3. **CSRF (Cross-Site Request Forgery)**:
+   - Origin header validation in middleware
+   - CSRF token validation in `validateCSRFToken()`
+   - SameSite cookie enforcement
+
+4. **Command Injection**:
+   - Pattern detection in `containsCommandInjection()`
+   - Input sanitization removes shell special characters
+   - Path validation prevents command execution
+
+5. **Path Traversal**:
+   - URL pattern detection in middleware
+   - File path sanitization in `sanitizeFilePath()`
+   - File name sanitization in `sanitizeFileName()`
+
+6. **File Upload Attacks**:
+   - File type validation (MIME type and extension)
+   - File size limits
+   - Dangerous file detection (executables, scripts)
+   - Specialized validators for images and documents
+
+7. **Rate Limiting**:
+   - IP-based rate limiting
+   - Configurable limits per endpoint
+   - Automatic cleanup of expired entries
+
+8. **Large Payload Attacks**:
+   - Body size validation
+   - Request size limits
+   - Configurable maximum sizes
+
 ## Production Checklist
 
 - [ ] `SIGNING_TOKEN_SECRET` is set to secure random 32+ character string
@@ -94,5 +177,12 @@ Configure in `lib/security/tokens.ts`:
 - [ ] Database RLS policies are active
 - [ ] Supabase service role key is kept secret
 - [ ] Stripe webhook signature verification is enabled
+- [ ] CSRF protection is enabled for state-changing operations
+- [ ] File uploads are validated using `validateFileUpload()`
+- [ ] All user inputs are sanitized before database operations
+- [ ] Origin validation is working in production
+- [ ] Security logging is enabled for attack detection
+
+
 
 

@@ -17,7 +17,7 @@ const TIERS = [
     price: TIER_CONFIG.free.price,
     description: "Free plan with basic features",
     features: [
-      "3 Contracts (lifetime)",
+      "3 Contracts only",
       "No templates",
       "Basic features",
       "Single company",
@@ -35,6 +35,7 @@ const TIERS = [
       "7-Day Free Trial included",
       "2 Contract Templates",
       "20 Contracts per month",
+      "AI Contract Generation",
       "Click to Sign",
       "Email Delivery",
       "Basic Support",

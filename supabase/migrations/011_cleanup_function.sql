@@ -26,3 +26,5 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 GRANT EXECUTE ON FUNCTION cleanup_old_contracts() TO authenticated;
 
 
+
+

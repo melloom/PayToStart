@@ -6,3 +6,5 @@ CREATE POLICY "Contractors can update their own company"
   USING (id = get_contractor_company_id())
   WITH CHECK (id = get_contractor_company_id());
 
+
+

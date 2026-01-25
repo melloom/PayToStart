@@ -9,6 +9,9 @@ import type {
   Company,
   UsageCounter,
   SubscriptionTier,
+  ContractDraft,
+  TemplateDraft,
+  PaymentProvider,
 } from "./types";
 
 export const db = {
@@ -166,6 +169,18 @@ export const db = {
       return data.map(mapClientFromDb);
     },
 
+    async findByIds(ids: string[]): Promise<Client[]> {
+      if (ids.length === 0) return [];
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("clients")
+        .select("*")
+        .in("id", ids);
+
+      if (error) return [];
+      return data.map(mapClientFromDb);
+    },
+
     async create(data: {
       companyId: string;
       email: string;
@@ -186,6 +201,16 @@ export const db = {
 
       if (error) throw error;
       return mapClientFromDb(client);
+    },
+
+    async delete(id: string): Promise<void> {
+      const supabase = await createClient();
+      const { error } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
     },
   },
 
@@ -567,6 +592,7 @@ export const db = {
         const supabase = await createClient();
         const updateData: any = {};
 
+        if (data.name !== undefined) updateData.name = data.name;
         if (data.subscriptionTier !== undefined) updateData.subscription_tier = data.subscriptionTier;
         if (data.subscriptionStripeSubscriptionId !== undefined) updateData.subscription_stripe_subscription_id = data.subscriptionStripeSubscriptionId;
         if (data.subscriptionStripeCustomerId !== undefined) updateData.subscription_stripe_customer_id = data.subscriptionStripeCustomerId;
@@ -693,6 +719,325 @@ export const db = {
       return data.map(mapUsageCounterFromDb);
     },
   },
+
+  contractDrafts: {
+    async findByContractorId(contractorId: string): Promise<ContractDraft[]> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("contract_drafts")
+        .select("*")
+        .eq("contractor_id", contractorId)
+        .order("updated_at", { ascending: false });
+
+      if (error) return [];
+      return data.map(mapContractDraftFromDb);
+    },
+
+    async findById(id: string): Promise<ContractDraft | null> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("contract_drafts")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error || !data) return null;
+      return mapContractDraftFromDb(data);
+    },
+
+    async create(data: Omit<ContractDraft, "id" | "createdAt" | "updatedAt">): Promise<ContractDraft> {
+      const supabase = await createClient();
+      const { data: draft, error } = await supabase
+        .from("contract_drafts")
+        .insert({
+          company_id: data.companyId,
+          contractor_id: data.contractorId,
+          client_id: data.clientId || null,
+          template_id: data.templateId || null,
+          title: data.title,
+          content: data.content,
+          field_values: data.fieldValues,
+          custom_fields: data.customFields,
+          deposit_amount: data.depositAmount,
+          total_amount: data.totalAmount,
+          metadata: data.metadata || {},
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return mapContractDraftFromDb(draft);
+    },
+
+    async update(id: string, data: Partial<ContractDraft>): Promise<ContractDraft | null> {
+      const supabase = await createClient();
+      const updateData: any = {};
+      if (data.title !== undefined) updateData.title = data.title;
+      if (data.content !== undefined) updateData.content = data.content;
+      if (data.fieldValues !== undefined) updateData.field_values = data.fieldValues;
+      if (data.customFields !== undefined) updateData.custom_fields = data.customFields;
+      if (data.depositAmount !== undefined) updateData.deposit_amount = data.depositAmount;
+      if (data.totalAmount !== undefined) updateData.total_amount = data.totalAmount;
+      if (data.clientId !== undefined) updateData.client_id = data.clientId || null;
+      if (data.templateId !== undefined) updateData.template_id = data.templateId || null;
+      if (data.metadata !== undefined) updateData.metadata = data.metadata;
+
+      const { data: draft, error } = await supabase
+        .from("contract_drafts")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return draft ? mapContractDraftFromDb(draft) : null;
+    },
+
+    async delete(id: string): Promise<void> {
+      const supabase = await createClient();
+      const { error } = await supabase
+        .from("contract_drafts")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+
+    async deleteAllByContractorId(contractorId: string): Promise<number> {
+      const supabase = await createClient();
+      
+      // First, get count of drafts to delete
+      const { data: drafts, error: fetchError } = await supabase
+        .from("contract_drafts")
+        .select("id")
+        .eq("contractor_id", contractorId);
+
+      if (fetchError) throw fetchError;
+      
+      if (!drafts || drafts.length === 0) {
+        return 0;
+      }
+
+      // Delete all drafts
+      const { error: deleteError } = await supabase
+        .from("contract_drafts")
+        .delete()
+        .eq("contractor_id", contractorId);
+
+      if (deleteError) throw deleteError;
+      
+      return drafts.length;
+    },
+  },
+
+  templateDrafts: {
+    async findByContractorId(contractorId: string): Promise<TemplateDraft[]> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("template_drafts")
+        .select("*")
+        .eq("contractor_id", contractorId)
+        .order("updated_at", { ascending: false });
+
+      if (error) return [];
+      return data.map(mapTemplateDraftFromDb);
+    },
+
+    async findById(id: string): Promise<TemplateDraft | null> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("template_drafts")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error || !data) return null;
+      return mapTemplateDraftFromDb(data);
+    },
+
+    async create(data: Omit<TemplateDraft, "id" | "createdAt" | "updatedAt">): Promise<TemplateDraft> {
+      const supabase = await createClient();
+      const { data: draft, error } = await supabase
+        .from("template_drafts")
+        .insert({
+          company_id: data.companyId,
+          contractor_id: data.contractorId,
+          name: data.name,
+          content: data.content,
+          fields: data.fields,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return mapTemplateDraftFromDb(draft);
+    },
+
+    async update(id: string, data: Partial<TemplateDraft>): Promise<TemplateDraft | null> {
+      const supabase = await createClient();
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.content !== undefined) updateData.content = data.content;
+      if (data.fields !== undefined) updateData.fields = data.fields;
+
+      const { data: draft, error } = await supabase
+        .from("template_drafts")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return draft ? mapTemplateDraftFromDb(draft) : null;
+    },
+
+    async delete(id: string): Promise<void> {
+      const supabase = await createClient();
+      const { error } = await supabase
+        .from("template_drafts")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+  },
+
+  paymentProviders: {
+    async findByCompanyId(companyId: string): Promise<PaymentProvider[]> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("payment_providers")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return (data || []).map(mapPaymentProviderFromDb);
+    },
+
+    async findById(id: string): Promise<PaymentProvider | null> {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("payment_providers")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error || !data) return null;
+      return mapPaymentProviderFromDb(data);
+    },
+
+    async create(data: {
+      companyId: string;
+      providerType: string;
+      providerName: string;
+      status?: string;
+      isDefault?: boolean;
+      connectionData?: Record<string, any>;
+      stripeCustomerId?: string;
+      stripeAccountId?: string;
+    }): Promise<PaymentProvider> {
+      const supabase = await createClient();
+      
+      // If setting as default, unset other defaults first
+      if (data.isDefault) {
+        await supabase
+          .from("payment_providers")
+          .update({ is_default: false })
+          .eq("company_id", data.companyId)
+          .eq("is_default", true);
+      }
+
+      const { data: provider, error } = await supabase
+        .from("payment_providers")
+        .insert({
+          company_id: data.companyId,
+          provider_type: data.providerType,
+          provider_name: data.providerName,
+          status: data.status || "pending",
+          is_default: data.isDefault || false,
+          connection_data: data.connectionData || {},
+          stripe_customer_id: data.stripeCustomerId,
+          stripe_account_id: data.stripeAccountId,
+          connected_at: data.status === "connected" ? new Date().toISOString() : null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return mapPaymentProviderFromDb(provider);
+    },
+
+    async update(id: string, data: Partial<{
+      providerName: string;
+      status: string;
+      isDefault: boolean;
+      connectionData: Record<string, any>;
+      stripeCustomerId: string;
+      stripeAccountId: string;
+      errorMessage: string;
+    }>): Promise<PaymentProvider | null> {
+      const supabase = await createClient();
+      
+      const provider = await this.findById(id);
+      if (!provider) return null;
+
+      const updateData: any = {};
+      
+      if (data.providerName !== undefined) updateData.provider_name = data.providerName;
+      if (data.status !== undefined) {
+        updateData.status = data.status;
+        if (data.status === "connected" && !provider.connectedAt) {
+          updateData.connected_at = new Date().toISOString();
+        }
+        if (data.status === "disconnected" && !provider.disconnectedAt) {
+          updateData.disconnected_at = new Date().toISOString();
+        }
+      }
+      if (data.isDefault !== undefined) {
+        updateData.is_default = data.isDefault;
+        // If setting as default, unset other defaults
+        if (data.isDefault) {
+          await supabase
+            .from("payment_providers")
+            .update({ is_default: false })
+            .eq("company_id", provider.companyId)
+            .eq("is_default", true)
+            .neq("id", id);
+        }
+      }
+      if (data.connectionData !== undefined) updateData.connection_data = data.connectionData;
+      if (data.stripeCustomerId !== undefined) updateData.stripe_customer_id = data.stripeCustomerId;
+      if (data.stripeAccountId !== undefined) updateData.stripe_account_id = data.stripeAccountId;
+      if (data.errorMessage !== undefined) updateData.error_message = data.errorMessage;
+
+      if (Object.keys(updateData).length === 0) {
+        return provider;
+      }
+
+      const { data: updated, error } = await supabase
+        .from("payment_providers")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return updated ? mapPaymentProviderFromDb(updated) : null;
+    },
+
+    async delete(id: string): Promise<boolean> {
+      const supabase = await createClient();
+      const { error } = await supabase
+        .from("payment_providers")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      return true;
+    },
+  },
 };
 
 // Helper functions to map database rows to types
@@ -799,6 +1144,58 @@ function mapUsageCounterFromDb(row: any): UsageCounter {
     periodStart: new Date(row.period_start),
     periodEnd: new Date(row.period_end),
     count: row.count,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function mapContractDraftFromDb(row: any): ContractDraft {
+  return {
+    id: row.id,
+    contractorId: row.contractor_id,
+    companyId: row.company_id,
+    clientId: row.client_id || undefined,
+    templateId: row.template_id || undefined,
+    title: row.title,
+    content: row.content,
+    fieldValues: row.field_values || {},
+    customFields: row.custom_fields || [],
+    depositAmount: Number(row.deposit_amount || 0),
+    totalAmount: Number(row.total_amount || 0),
+    metadata: row.metadata || {},
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function mapTemplateDraftFromDb(row: any): TemplateDraft {
+  return {
+    id: row.id,
+    contractorId: row.contractor_id,
+    companyId: row.company_id,
+    name: row.name,
+    content: row.content,
+    fields: row.fields || [],
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+function mapPaymentProviderFromDb(row: any): PaymentProvider {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    providerType: row.provider_type,
+    providerName: row.provider_name,
+    status: row.status,
+    isDefault: row.is_default || false,
+    connectionData: row.connection_data || {},
+    stripeCustomerId: row.stripe_customer_id || undefined,
+    stripeAccountId: row.stripe_account_id || undefined,
+    connectedAt: row.connected_at ? new Date(row.connected_at) : undefined,
+    disconnectedAt: row.disconnected_at ? new Date(row.disconnected_at) : undefined,
+    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at) : undefined,
+    errorMessage: row.error_message || undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };

@@ -56,6 +56,15 @@ export default function SettingsTabs({
     }
   }, [tabParam]);
 
+  // Track tab changes to reload data when switching back
+  const [previousTab, setPreviousTab] = useState(activeTab);
+  useEffect(() => {
+    if (previousTab !== activeTab) {
+      setPreviousTab(activeTab);
+      // Tab changed - could trigger reloads here if needed
+    }
+  }, [activeTab, previousTab]);
+
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
       <TabsList className="grid w-full grid-cols-3 mb-6">

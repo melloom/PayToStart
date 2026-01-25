@@ -7,11 +7,14 @@ import { headers } from "next/headers";
 import Stripe from "stripe";
 import type { SubscriptionTier } from "@/lib/types";
 import { sendEmail } from "@/lib/email";
+import { sendNotificationIfEnabled } from "@/lib/email/notifications";
 import {
   getInvoicePaymentSucceededEmail,
   getInvoicePaymentFailedEmail,
   getTrialWillEndEmail,
   getInvoiceUpcomingEmail,
+  getSubscriptionCreatedEmail,
+  getSubscriptionEndingEmail,
 } from "@/lib/email/subscription-templates";
 
 // Get webhook secret based on mode (lazy evaluation to avoid build-time errors)
@@ -80,8 +83,8 @@ export async function POST(request: Request) {
             (company.trialEnd && new Date(company.trialEnd) > new Date());
           
           await db.companies.update(company.id, {
-            // Only update subscription tier if subscription is active (not trialing)
-            subscriptionTier: subscription.status === "active" ? tier : company.subscriptionTier,
+            // Set tier to the subscribed tier regardless of status (active or trialing)
+            subscriptionTier: tier, // Always set to the tier they subscribed to
             subscriptionStripeSubscriptionId: subscription.id,
             subscriptionStripeCustomerId: subscription.customer as string,
             subscriptionStatus: subscription.status,
@@ -129,11 +132,9 @@ export async function POST(request: Request) {
           (company?.trialEnd && new Date(company.trialEnd) > new Date());
 
         // Update company subscription
-        // If subscription is trialing, don't override the trial tier yet
-        // The tier will be set when subscription becomes active after trial
+        // Set tier to the subscribed tier regardless of status (active or trialing)
         await db.companies.update(companyId, {
-          // Only update subscription tier if subscription is active (not trialing)
-          subscriptionTier: subscription.status === "active" ? tier : company?.subscriptionTier || tier,
+          subscriptionTier: tier, // Always set to the tier they subscribed to
           subscriptionStripeSubscriptionId: subscriptionId,
           subscriptionStripeCustomerId: subscription.customer as string,
           subscriptionStatus: subscription.status,
@@ -144,6 +145,45 @@ export async function POST(request: Request) {
         });
 
         console.log(`Subscription created for company ${companyId}: ${tier}, status: ${subscription.status}, in trial: ${isInTrial}`);
+
+        // Send subscription confirmation email
+        try {
+          const contractor = await db.contractors.findByCompanyId(companyId);
+          if (contractor) {
+            const trialEndDate = isInTrial && subscription.trial_end 
+              ? new Date(subscription.trial_end * 1000)
+              : undefined;
+            const nextBillingDate = subscription.current_period_end
+              ? new Date(subscription.current_period_end * 1000)
+              : undefined;
+
+            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : "http://localhost:3000";
+
+            const { subject, html } = getSubscriptionCreatedEmail({
+              contractorName: contractor.name,
+              contractorEmail: contractor.email,
+              tier: tier,
+              hasTrial: isInTrial,
+              trialEndDate: trialEndDate,
+              subscriptionStartDate: new Date(subscription.current_period_start * 1000),
+              nextBillingDate: nextBillingDate,
+              dashboardUrl: `${baseUrl}/dashboard`,
+            });
+
+            await sendEmail({
+              to: contractor.email,
+              subject,
+              html,
+            });
+            console.log("Subscription confirmation email sent to:", contractor.email);
+          }
+        } catch (emailError) {
+          console.error("Error sending subscription confirmation email:", emailError);
+          // Don't fail the webhook if email fails
+        }
+
         return NextResponse.json({ received: true });
       }
 
@@ -286,28 +326,70 @@ export async function POST(request: Request) {
       if (company) {
         const tier = subscription.metadata?.tier as SubscriptionTier;
         
-        // When subscription transitions from trialing to active, activate the subscription tier
-        // This happens when the trial period ends
+        // Update subscription tier - always use the tier from subscription metadata
+        // This ensures the tier is set correctly whether in trial or active
         const wasTrialing = company.subscriptionStatus === "trialing";
         const isNowActive = subscription.status === "active";
         
-        // If trial just ended and subscription is now active, update to the subscription tier
-        const shouldUpdateTier = wasTrialing && isNowActive && tier;
+        // Always update to the subscription tier (from metadata) if available
+        // This ensures tier is correct during trial and after trial ends
+        const shouldUpdateTier = tier && (tier !== company.subscriptionTier);
         
         await db.companies.update(company.id, {
           subscriptionStatus: subscription.status,
           subscriptionCurrentPeriodStart: new Date(subscription.current_period_start * 1000),
           subscriptionCurrentPeriodEnd: new Date(subscription.current_period_end * 1000),
           subscriptionCancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-          // Update tier when trial ends and subscription becomes active
-          subscriptionTier: shouldUpdateTier ? tier : (tier || company.subscriptionTier),
+          // Always update tier if provided in metadata (works for both trialing and active)
+          subscriptionTier: tier || company.subscriptionTier,
           planSelected: true, // Ensure plan is marked as selected
         });
 
         if (shouldUpdateTier) {
-          console.log(`Trial ended for company ${company.id}, subscription tier ${tier} now active`);
+          console.log(`Subscription tier updated for company ${company.id}: ${company.subscriptionTier} -> ${tier}, status: ${subscription.status}`);
         } else {
           console.log(`Subscription updated for company ${company.id}, status: ${subscription.status}`);
+        }
+
+        // Check if subscription ends in 1 day and send notification email
+        if (subscription.cancel_at_period_end && subscription.current_period_end) {
+          const periodEnd = new Date(subscription.current_period_end * 1000);
+          const now = new Date();
+          const daysUntilEnd = Math.ceil((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          
+          // Send email if subscription ends in 1 day (within 24-48 hours)
+          if (daysUntilEnd === 1 || (daysUntilEnd > 0 && daysUntilEnd < 2)) {
+            const contractor = await db.contractors.findByCompanyId(company.id);
+            
+            if (contractor && contractor.email) {
+              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+                ? `https://${process.env.VERCEL_URL}` 
+                : "http://localhost:3000";
+              const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
+              
+              try {
+                const { subject, html } = getSubscriptionEndingEmail({
+                  contractorName: contractor.name,
+                  contractorEmail: contractor.email,
+                  companyName: company.name,
+                  tier: tier || company.subscriptionTier,
+                  subscriptionEndDate: periodEnd,
+                  billingPortalUrl: billingPortalUrl,
+                });
+                
+                await sendEmail({
+                  to: contractor.email,
+                  subject,
+                  html,
+                });
+                
+                console.log(`Subscription ending notification sent to ${contractor.email} for company ${company.id}`);
+              } catch (emailError: any) {
+                console.error("Error sending subscription ending email:", emailError);
+                // Don't fail the webhook if email fails
+              }
+            }
+          }
         }
       }
     } catch (error: any) {
@@ -367,7 +449,7 @@ export async function POST(request: Request) {
               : "http://localhost:3000";
             const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
             
-            // Send payment success email
+            // Send payment success email (check subscriptionUpdates preference)
             const { subject, html } = getInvoicePaymentSucceededEmail({
               contractorName: contractor.name,
               contractorEmail: contractor.email,
@@ -379,11 +461,15 @@ export async function POST(request: Request) {
               nextBillingDate: invoice.period_end ? new Date(invoice.period_end * 1000) : undefined,
             });
             
-            await sendEmail({
+            await sendNotificationIfEnabled(
+              contractor.id,
+              "subscriptionUpdates",
+              () => sendEmail({
               to: contractor.email,
               subject,
               html,
-            });
+              })
+            );
             
             // Update subscription status if needed
             await db.companies.update(company.id, {
@@ -427,7 +513,7 @@ export async function POST(request: Request) {
               : "http://localhost:3000";
             const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
             
-            // Send payment failed email
+            // Send payment failed email (check subscriptionUpdates preference)
             const { subject, html } = getInvoicePaymentFailedEmail({
               contractorName: contractor.name,
               contractorEmail: contractor.email,
@@ -437,11 +523,15 @@ export async function POST(request: Request) {
               billingPortalUrl: billingPortalUrl,
             });
             
-            await sendEmail({
+            await sendNotificationIfEnabled(
+              contractor.id,
+              "subscriptionUpdates",
+              () => sendEmail({
               to: contractor.email,
               subject,
               html,
-            });
+              })
+            );
             
             // Update subscription status
             await db.companies.update(company.id, {
@@ -478,7 +568,7 @@ export async function POST(request: Request) {
             : "http://localhost:3000";
           const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
           
-          // Send trial ending email
+          // Send trial ending email (check subscriptionUpdates preference)
           const { subject, html } = getTrialWillEndEmail({
             contractorName: contractor.name,
             contractorEmail: contractor.email,
@@ -488,11 +578,15 @@ export async function POST(request: Request) {
             billingPortalUrl: billingPortalUrl,
           });
           
-          await sendEmail({
+          await sendNotificationIfEnabled(
+            contractor.id,
+            "subscriptionUpdates",
+            () => sendEmail({
             to: contractor.email,
             subject,
             html,
-          });
+            })
+          );
           
           console.log(`Trial will end notification sent to ${contractor.email} for company ${company.id}`);
         }
@@ -528,7 +622,7 @@ export async function POST(request: Request) {
               : "http://localhost:3000";
             const billingPortalUrl = `${baseUrl}/dashboard/subscription`;
             
-            // Send upcoming invoice email
+            // Send upcoming invoice email (check invoiceUpcoming preference)
             const { subject, html } = getInvoiceUpcomingEmail({
               contractorName: contractor.name,
               contractorEmail: contractor.email,
@@ -539,11 +633,15 @@ export async function POST(request: Request) {
               billingPortalUrl: billingPortalUrl,
             });
             
-            await sendEmail({
+            await sendNotificationIfEnabled(
+              contractor.id,
+              "invoiceUpcoming",
+              () => sendEmail({
               to: contractor.email,
               subject,
               html,
-            });
+              })
+            );
             
             console.log(`Upcoming invoice notification sent to ${contractor.email} for company ${company.id}`);
           }

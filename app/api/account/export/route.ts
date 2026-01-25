@@ -16,16 +16,25 @@ export async function GET(request: Request) {
     const supabase = await createClient();
 
     // Get all user data
-    const [contracts, templates, clients, company] = await Promise.all([
+    const [contractsResult, templatesResult, clients, company] = await Promise.all([
       // Get contracts
-      db.contracts.findByCompanyId(contractor.companyId),
+      supabase
+        .from("contracts")
+        .select("*")
+        .eq("company_id", contractor.companyId),
       // Get templates
-      db.templates.findByCompanyId(contractor.companyId),
+      supabase
+        .from("contract_templates")
+        .select("*")
+        .eq("company_id", contractor.companyId),
       // Get clients
       db.clients.findByCompanyId(contractor.companyId),
       // Get company
       db.companies.findById(contractor.companyId),
     ]);
+
+    const contracts = contractsResult.data || [];
+    const templates = templatesResult.data || [];
 
     // Get payments
     const { data: payments } = await supabase
@@ -55,22 +64,22 @@ export async function GET(request: Request) {
         createdAt: company.createdAt,
         updatedAt: company.updatedAt,
       } : null,
-      contracts: contracts.map(c => ({
+      contracts: contracts.map((c: any) => ({
         id: c.id,
         title: c.title,
         status: c.status,
-        totalAmount: c.totalAmount,
-        depositAmount: c.depositAmount,
-        createdAt: c.createdAt,
-        signedAt: c.signedAt,
-        paidAt: c.paidAt,
-        completedAt: c.completedAt,
+        totalAmount: parseFloat(c.total_amount || 0),
+        depositAmount: parseFloat(c.deposit_amount || 0),
+        createdAt: c.created_at,
+        signedAt: c.signed_at,
+        paidAt: c.paid_at,
+        completedAt: c.completed_at,
       })),
-      templates: templates.map(t => ({
+      templates: templates.map((t: any) => ({
         id: t.id,
         name: t.name,
-        createdAt: t.createdAt,
-        updatedAt: t.updatedAt,
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
       })),
       clients: clients.map(c => ({
         id: c.id,

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, FileText, Clock, CheckCircle, DollarSign } from "lucide-react";
 import { format } from "date-fns";
 import type { Metadata } from "next";
+import { SubscriptionThankYouDialog } from "@/components/subscription-thank-you-dialog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -71,7 +72,9 @@ export default async function DashboardPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <>
+      <SubscriptionThankYouDialog />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
@@ -223,6 +226,7 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
     </div>
+    </>
   );
 }
 

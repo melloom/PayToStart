@@ -301,3 +301,4 @@ export default async function ContractDetailPage({
     </div>
   );
 }
+

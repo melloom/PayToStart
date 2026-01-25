@@ -3,7 +3,9 @@ import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generateContractPDF } from "@/lib/pdf";
 
-// Dynamic import for JSZip (works in both Node.js and Edge runtime)
+export const runtime = "nodejs"; // JSZip requires Node.js runtime
+
+// Dynamic import for JSZip
 let JSZip: any;
 async function getJSZip() {
   if (!JSZip) {

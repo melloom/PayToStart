@@ -7,6 +7,7 @@ import { sendEmail } from "./email";
 import { getSignature } from "./signature";
 import { createClient } from "./supabase-server";
 import { getDepositReceivedEmail } from "./email/templates";
+import { sendNotificationIfEnabled } from "./email/notifications";
 import type { Contract } from "./types";
 
 export async function finalizeContract(
@@ -163,18 +164,22 @@ export async function finalizeContract(
     );
 
     await Promise.all([
-      // Email to client
+      // Email to client (always send - clients don't have preferences)
       sendEmail({
         to: client.email,
         subject: clientEmailTemplate.subject,
         html: clientEmailTemplate.html,
       }),
-      // Email to contractor
-      sendEmail({
+      // Email to contractor (check preferences for contractPaid and paymentReceived)
+      sendNotificationIfEnabled(
+        contractor.id,
+        "contractPaid",
+        () => sendEmail({
         to: contractor.email,
         subject: contractorEmailTemplate.subject,
         html: contractorEmailTemplate.html,
-      }),
+        })
+      ),
     ]);
 
     return {

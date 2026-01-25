@@ -10,3 +10,5 @@ CREATE INDEX IF NOT EXISTS idx_companies_plan_selected ON companies(plan_selecte
 -- Add comment for documentation
 COMMENT ON COLUMN companies.plan_selected IS 'Tracks if user has explicitly selected a subscription plan (not just defaulted to free)';
 
+
+
