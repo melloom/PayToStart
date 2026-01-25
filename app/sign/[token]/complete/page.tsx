@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle, FileText, Mail, Download, Loader2, CreditCard } from "lucide-react";
@@ -21,6 +21,8 @@ export default function SignCompletePage() {
   const [customerId, setCustomerId] = useState<string | null>(null);
   const sessionId = searchParams.get("session_id");
   const token = params.token as string;
+  const hasAutoDownloadedRef = useRef<string | null>(null);
+  const hasInitializedRef = useRef<string | null>(null);
 
   const handleDownloadPDF = useCallback(async () => {
     if (!token) return;
@@ -76,8 +78,10 @@ export default function SignCompletePage() {
         setPaymentMethod(data.paymentMethod);
         setCustomerId(data.customerId);
         
-        // Auto-download PDF when payment is completed
-        if (data.paid && token) {
+        // Auto-download PDF when payment is completed (only once per session)
+        const sessionKey = `${token}-${sessionId}`;
+        if (data.paid && token && hasAutoDownloadedRef.current !== sessionKey) {
+          hasAutoDownloadedRef.current = sessionKey;
           // Wait a moment for PDF to be generated, then download
           setTimeout(() => {
             handleDownloadPDF();
@@ -139,6 +143,14 @@ export default function SignCompletePage() {
   }, [token]);
 
   useEffect(() => {
+    // Create a unique key for this session to prevent duplicate initializations
+    const sessionKey = `${token}-${sessionId || 'no-session'}`;
+    
+    // Prevent multiple initializations for the same session (especially during fast refresh)
+    if (hasInitializedRef.current === sessionKey) return;
+    
+    hasInitializedRef.current = sessionKey;
+    
     // Always fetch contract data first to ensure we have it
     if (token) {
       fetchContractData();
@@ -221,7 +233,7 @@ export default function SignCompletePage() {
                   
                   <div className="space-y-3">
                     <p className="text-sm text-slate-700">
-                      Would you like to save this card to automatically pay the remaining balance when it's due?
+                      Would you like to save this card to automatically pay the remaining balance when it&apos;s due?
                     </p>
                     
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -229,18 +241,18 @@ export default function SignCompletePage() {
                         If you save it:
                       </p>
                       <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-                        <li>We'll automatically charge <strong>${contract.remainingBalance?.toFixed(2)}</strong> when the balance is due</li>
+                        <li>We&apos;ll automatically charge <strong>${contract.remainingBalance?.toFixed(2)}</strong> when the balance is due</li>
                         <li>No need to enter card details again</li>
-                        <li>You'll receive email notifications before charging</li>
+                        <li>You&apos;ll receive email notifications before charging</li>
                       </ul>
                     </div>
                     
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                       <p className="text-sm font-semibold text-amber-900 mb-2">
-                        If you don't save it:
+                        If you don&apos;t save it:
                       </p>
                       <p className="text-sm text-amber-800">
-                        Your card will only be used for this {contract.depositAmount > 0 ? 'deposit' : 'payment'}. You'll need to enter payment details again when the remaining balance is due.
+                        Your card will only be used for this {contract.depositAmount > 0 ? 'deposit' : 'payment'}. You&apos;ll need to enter payment details again when the remaining balance is due.
                       </p>
                     </div>
                   </div>
@@ -433,7 +445,7 @@ export default function SignCompletePage() {
                   {((contract.totalAmount || 0) - (contract.depositAmount || 0)) > 0 && (
                     <>
                       <p className="text-sm text-amber-800 mb-3">
-                        The remaining balance will be due according to your contract terms. You'll receive a payment link via email when it's time to pay.
+                        The remaining balance will be due according to your contract terms. You&apos;ll receive a payment link via email when it&apos;s time to pay.
                       </p>
                       {contract.paymentUrl && (
                         <Button
