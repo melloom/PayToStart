@@ -1372,9 +1372,9 @@ export default function LandingPage() {
                   © {new Date().getFullYear()} <span className="font-semibold text-white">Pay2Start</span>. All rights reserved.
                 </div>
                 <div className="flex items-center gap-6 text-sm">
-                  <a href="#" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Privacy Policy</a>
-                  <a href="#" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Terms of Service</a>
-                  <a href="#" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Cookie Policy</a>
+                  <Link href="/privacy" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Privacy Policy</Link>
+                  <Link href="/terms" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Terms of Service</Link>
+                  <Link href="/cookies" className="text-slate-400 hover:text-indigo-400 transition-colors font-medium">Cookie Policy</Link>
                 </div>
               </div>
               
