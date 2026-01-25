@@ -116,26 +116,40 @@ export async function POST(
         updateData.passwordHash = passwordHash;
       }
       
-      // Save payment method to fieldValues if provided
+      // Save payment method and recipient email to fieldValues if provided
+      const currentFieldValues = contract.fieldValues || {};
+      updateData.fieldValues = {
+        ...currentFieldValues,
+        // ALWAYS update clientEmail with the recipient email (most recent one)
+        clientEmail: clientEmailToUse,
+      };
+      
       if (paymentMethod && typeof paymentMethod === "string" && paymentMethod.trim()) {
-        const currentFieldValues = contract.fieldValues || {};
-        updateData.fieldValues = {
-          ...currentFieldValues,
-          paymentMethod: paymentMethod.trim(),
-          paymentMethodSetAt: new Date().toISOString(),
-        };
+        updateData.fieldValues.paymentMethod = paymentMethod.trim();
+        updateData.fieldValues.paymentMethodSetAt = new Date().toISOString();
       }
       
       if (contract.status === "draft" || contract.status === "ready") {
         await db.contracts.update(contract.id, updateData);
       } else if (paymentMethod && typeof paymentMethod === "string" && paymentMethod.trim()) {
-        // Even if status is already "sent", update payment method if provided
+        // Even if status is already "sent", update payment method and email if provided
         const currentFieldValues = contract.fieldValues || {};
         await db.contracts.update(contract.id, {
           fieldValues: {
             ...currentFieldValues,
+            // ALWAYS update clientEmail with the recipient email (most recent one)
+            clientEmail: clientEmailToUse,
             paymentMethod: paymentMethod.trim(),
             paymentMethodSetAt: new Date().toISOString(),
+          },
+        });
+      } else {
+        // Even if no payment method, update the email to the most recent recipient
+        const currentFieldValues = contract.fieldValues || {};
+        await db.contracts.update(contract.id, {
+          fieldValues: {
+            ...currentFieldValues,
+            clientEmail: clientEmailToUse,
           },
         });
       }

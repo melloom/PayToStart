@@ -2,7 +2,7 @@
 import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { ContractPDF } from "@/lib/pdf/contract-pdf";
-import { getSignature } from "./signature";
+import { getAllSignatures } from "./signature";
 import { storage } from "./storage";
 import type { Contract } from "./types";
 
@@ -21,18 +21,24 @@ export async function generateContractPDF(
     receiptUrl?: string | null;
   } | null
 ): Promise<Buffer> {
-  // Get signature data if available
-  const signature = await getSignature(contract.id);
+  // Get all signatures (client and contractor) if available
+  const { clientSignature, contractorSignature } = await getAllSignatures(
+    contract.id,
+    contract.clientId,
+    contract.contractorId
+  );
 
-  // Get signed URL for signature image if it exists (for private storage)
-  // Try to get from contracts bucket first, then fallback to signatures bucket
-  let signatureImageUrl: string | null = null;
-  if (signature?.signature_url && signature.signature_url.trim() !== "") {
+  // Helper function to get signed URL for signature image
+  const getSignatureImageUrl = async (signature: any): Promise<string | null> => {
+    if (!signature?.signature_url || signature.signature_url.trim() === "") {
+      return null;
+    }
+
     try {
       // Try to get from contracts bucket (new path)
       try {
         const contractsPath = `company/${contract.companyId}/contracts/${contract.id}/signature.png`;
-        signatureImageUrl = await storage.getSignedUrl("contracts", contractsPath, 3600);
+        return await storage.getSignedUrl("contracts", contractsPath, 3600);
       } catch {
         // Fallback to old signatures bucket path
         if (signature.signature_url.includes("supabase")) {
@@ -40,21 +46,37 @@ export async function generateContractPDF(
           const url = new URL(signature.signature_url);
           const pathMatch = url.pathname.match(/\/signatures\/(.+)$/);
           if (pathMatch && pathMatch[1]) {
-            signatureImageUrl = await storage.getSignedUrl("signatures", pathMatch[1], 3600);
+            return await storage.getSignedUrl("signatures", pathMatch[1], 3600);
           } else {
             // Try public URL path
-            signatureImageUrl = signature.signature_url;
+            return signature.signature_url;
           }
         } else {
-          signatureImageUrl = signature.signature_url;
+          return signature.signature_url;
         }
       }
     } catch (error) {
       console.error("Error getting signature URL:", error);
       // Fallback to original URL
-      signatureImageUrl = signature.signature_url;
+      return signature.signature_url;
     }
-  }
+  };
+
+  // Get signed URLs for both signatures
+  const clientSignatureImageUrl = clientSignature ? await getSignatureImageUrl(clientSignature) : null;
+  const contractorSignatureImageUrl = contractorSignature ? await getSignatureImageUrl(contractorSignature) : null;
+
+  // Clean contract content - remove "==========" separators
+  const cleanedContent = contract.content
+    .replace(/={10,}/g, '') // Remove lines of 10+ equals signs
+    .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with 2
+    .trim();
+
+  // Create a cleaned contract object
+  const cleanedContract = {
+    ...contract,
+    content: cleanedContent,
+  };
 
   // Extract branding from contract fieldValues
   const branding = contract.fieldValues && typeof contract.fieldValues === 'object' && '_branding' in contract.fieldValues
@@ -63,13 +85,19 @@ export async function generateContractPDF(
 
   // Render PDF using React component
   const pdfDocument = React.createElement(ContractPDF, {
-    contract,
+    contract: cleanedContract,
     client,
     contractor,
-    signature: signature
+    clientSignature: clientSignature
       ? {
-          ...signature,
-          signature_url: signatureImageUrl,
+          ...clientSignature,
+          signature_url: clientSignatureImageUrl,
+        }
+      : null,
+    contractorSignature: contractorSignature
+      ? {
+          ...contractorSignature,
+          signature_url: contractorSignatureImageUrl,
         }
       : null,
     payment: payment || null,

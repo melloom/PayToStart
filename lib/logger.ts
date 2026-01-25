@@ -6,10 +6,17 @@ import pino from "pino";
 // Determine log level from environment (default: info)
 const logLevel = process.env.LOG_LEVEL || (process.env.NODE_ENV === "production" ? "info" : "debug");
 
+// Check if we're in Next.js environment (which doesn't support worker threads well)
+// Next.js sets NEXT_RUNTIME environment variable
+const isNextJS = typeof process !== "undefined" && (process.env.NEXT_RUNTIME || process.env.NEXT_PHASE);
+
 // Create logger instance
+// In Next.js, avoid pino-pretty transport (uses worker threads which cause issues)
+// Use simple JSON output instead
 const logger = pino({
   level: logLevel,
-  ...(process.env.NODE_ENV !== "production" && {
+  // Only use pino-pretty in non-Next.js environments
+  ...(process.env.NODE_ENV !== "production" && !isNextJS && {
     transport: {
       target: "pino-pretty",
       options: {
@@ -18,6 +25,15 @@ const logger = pino({
         ignore: "pid,hostname",
       },
     },
+  }),
+  // In Next.js dev mode, use simple formatting
+  ...(process.env.NODE_ENV !== "production" && isNextJS && {
+    formatters: {
+      level: (label) => {
+        return { level: label };
+      },
+    },
+    timestamp: pino.stdTimeFunctions.isoTime,
   }),
   // Redact sensitive fields in production
   redact: {

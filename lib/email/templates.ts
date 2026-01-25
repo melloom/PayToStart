@@ -378,3 +378,89 @@ export function getReminderEmail(data: EmailTemplateData): { subject: string; ht
   return { subject, html };
 }
 
+
+/**
+ * Remaining balance due email - sent when remaining balance is due
+ * Subject: "Payment due: Remaining balance for [Contract Title]"
+ */
+export function getRemainingBalanceDueEmail(data: EmailTemplateData & { remainingBalance: number }): { subject: string; html: string } {
+  const subject = `Payment due: Remaining balance for ${data.contractTitle}`;
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+        <div style="background: white; border-radius: 8px; padding: 40px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #f59e0b; margin: 0; font-size: 28px;">Payment Due</h1>
+          </div>
+          
+          <p style="font-size: 16px; margin-bottom: 20px;">Hello ${data.clientName},</p>
+          
+          <p style="font-size: 16px; margin-bottom: 20px;">
+            This is a reminder that the remaining balance for your contract is now due:
+          </p>
+          
+          <div style="background: #f8f9fa; border-left: 4px solid #f59e0b; padding: 20px; margin: 30px 0; border-radius: 4px;">
+            <p style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">
+              ${data.contractTitle}
+            </p>
+            <p style="margin: 10px 0 0 0; font-size: 14px; color: #6b7280;">
+              From: ${data.contractorName}${data.contractorCompany ? ` (${data.contractorCompany})` : ""}
+            </p>
+          </div>
+          
+          <div style="background: #fef3c7; border-radius: 6px; padding: 20px; margin: 30px 0;">
+            <p style="margin: 0 0 10px 0; font-size: 16px; color: #92400e; font-weight: 600;">
+              Remaining Balance Due:
+            </p>
+            <p style="margin: 0; font-size: 32px; font-weight: bold; color: #92400e;">
+              $${data.remainingBalance.toFixed(2)}
+            </p>
+            ${data.totalAmount ? `
+            <p style="margin: 15px 0 0 0; font-size: 14px; color: #92400e;">
+              Total Contract Amount: $${data.totalAmount.toFixed(2)}
+            </p>
+            ` : ""}
+          </div>
+          
+          ${data.paymentUrl ? `
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="${data.paymentUrl}" 
+               style="display: inline-block; background: #f59e0b; color: white; padding: 16px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);">
+              Pay Remaining Balance Now
+            </a>
+          </div>
+          ` : ""}
+          
+          <div style="background: #f0f9ff; border-radius: 6px; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0; font-size: 14px; color: #1e40af;">
+              <strong>Important:</strong> Please complete payment to finalize your contract. Once payment is received, you'll receive a receipt and finalized contract PDF.
+            </p>
+          </div>
+          
+          ${data.paymentUrl ? `
+          <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
+            Or copy and paste this link into your browser:
+          </p>
+          <p style="font-size: 12px; color: #9ca3af; word-break: break-all; background: #f9fafb; padding: 10px; border-radius: 4px;">
+            ${data.paymentUrl}
+          </p>
+          ` : ""}
+          
+          <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;">
+            <p style="font-size: 14px; color: #6b7280; margin: 0;">
+              If you have any questions or need to discuss payment arrangements, please contact ${data.contractorName}${data.contractorEmail ? ` at ${data.contractorEmail}` : ""} or reach out to us at ${CONTACT_EMAIL}.
+            </p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+  
+  return { subject, html };
+}

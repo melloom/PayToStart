@@ -210,20 +210,25 @@ export async function POST(request: Request) {
       }
 
       // Process the completed checkout session
-      const { contract, receiptId, receiptUrl } = await processCompletedCheckoutSession(
+      const { contract, receiptId, receiptUrl, isFullyPaid } = await processCompletedCheckoutSession(
         session.id,
         session
       );
 
       console.log(`Payment processed for contract ${contract.id}`);
 
-      // Finalize contract: Generate PDF + Store + Email (with payment receipt info)
-      await finalizeContract(contract.id, {
-        receiptId: receiptId || null,
-        receiptUrl: receiptUrl || null,
-      });
+      // Only finalize contract if it's fully paid
+      if (isFullyPaid) {
+        // Finalize contract: Generate PDF + Store + Email (with payment receipt info)
+        await finalizeContract(contract.id, {
+          receiptId: receiptId || null,
+          receiptUrl: receiptUrl || null,
+        });
 
-      console.log(`Contract ${contract.id} finalized successfully`);
+        console.log(`Contract ${contract.id} finalized successfully (fully paid)`);
+      } else {
+        console.log(`Contract ${contract.id} payment received but not yet fully paid`);
+      }
 
       return NextResponse.json({
         received: true,

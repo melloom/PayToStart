@@ -326,6 +326,54 @@ export default async function ContractDetailPage({
                     <span className="font-semibold whitespace-nowrap">${contract.depositAmount.toFixed(2)}</span>
                   </div>
                 )}
+                
+                {/* Payment Status */}
+                {payments && payments.length > 0 && (
+                  <>
+                    <div className="border-t pt-2 mt-2">
+                      <div className="flex justify-between items-center gap-2 mb-2">
+                        <span className="text-muted-foreground text-sm">Payment Status:</span>
+                        <Badge variant={payments.some(p => p.status === "completed") ? "default" : "secondary"}>
+                          {payments.some(p => p.status === "completed") ? "Paid" : "Pending"}
+                        </Badge>
+                      </div>
+                      {payments.some(p => p.status === "completed") && (
+                        <div className="space-y-1">
+                          {payments
+                            .filter(p => p.status === "completed")
+                            .map((payment, idx) => (
+                              <div key={payment.id} className="flex justify-between items-center gap-2 text-sm">
+                                <span className="text-muted-foreground">
+                                  Paid: ${(typeof payment.amount === 'number' ? payment.amount : parseFloat(payment.amount || 0)).toFixed(2)}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {payment.completedAt 
+                                    ? format(new Date(payment.completedAt instanceof Date ? payment.completedAt : new Date(payment.completedAt)), "MMM d, yyyy")
+                                    : "Completed"
+                                  }
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Remaining Balance */}
+                    {contract.totalAmount > 0 && (
+                      <div className="border-t pt-2 mt-2">
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="text-muted-foreground text-sm">Remaining Balance:</span>
+                          <span className="font-semibold text-lg whitespace-nowrap">
+                            ${(contract.totalAmount - (payments
+                              .filter(p => p.status === "completed")
+                              .reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : parseFloat(p.amount || 0)), 0)
+                            )).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

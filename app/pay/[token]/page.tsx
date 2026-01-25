@@ -4,10 +4,14 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, CreditCard, CheckCircle, Shield, Zap } from "lucide-react";
+import { Loader2, CreditCard, CheckCircle, Shield, Zap, Mail } from "lucide-react";
 import type { Contract, Client } from "@/lib/types";
-import { getStripe } from "@/lib/stripe";
+
+// Force dynamic rendering - prevent static generation
+export const dynamic = "force-dynamic";
 
 export default function PaymentPage() {
   const params = useParams();
@@ -18,22 +22,78 @@ export default function PaymentPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  const [clientEmail, setClientEmail] = useState<string>("");
+  const [payments, setPayments] = useState<any[]>([]);
+  const [remainingBalance, setRemainingBalance] = useState<number | null>(null);
+
+  // Ensure we're on the client side
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
+    // Only fetch after component is mounted (client-side only)
+    if (!isMounted) return;
+
     async function fetchContract() {
+      const token = params?.token as string | undefined;
+      
+      if (!token) {
+        setIsLoading(false);
+        toast({
+          title: "Error",
+          description: "Invalid payment link",
+          variant: "destructive",
+        });
+        return;
+      }
+
       try {
-        const response = await fetch(`/api/contracts/sign/${params.token}`);
+        const response = await fetch(`/api/contracts/sign/${token}`);
         if (response.ok) {
           const data = await response.json();
           setContract(data.contract);
           setClient(data.client);
+          
+          // Set initial email from client or fieldValues
+          const initialEmail = data.client?.email || 
+            data.contract?.fieldValues?.clientEmail ||
+            data.contract?.fieldValues?.email ||
+            "";
+          setClientEmail(initialEmail);
+          
+          // Log for debugging
+          console.log("Contract data received:", {
+            contractId: data.contract?.id,
+            hasClient: !!data.client,
+            clientEmail: initialEmail,
+            contractStatus: data.contract?.status,
+          });
+
+          // Fetch payments to calculate remaining balance
+          try {
+            const paymentsResponse = await fetch(`/api/contracts/${data.contract.id}/payments`);
+            if (paymentsResponse.ok) {
+              const paymentsData = await paymentsResponse.json();
+              setPayments(paymentsData.payments || []);
+              
+              const totalPaid = (paymentsData.payments || [])
+                .filter((p: any) => p.status === "completed")
+                .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+              const remaining = (data.contract.totalAmount || 0) - totalPaid;
+              setRemainingBalance(remaining);
+            }
+          } catch (error) {
+            console.error("Error fetching payments:", error);
+          }
 
           // Check if already paid
-          if (data.contract.status === "paid" || data.contract.status === "completed") {
+          if (data.contract.status === "completed") {
             setPaymentCompleted(true);
-          } else if (data.contract.status !== "signed") {
+          } else if (data.contract.status !== "signed" && data.contract.status !== "paid") {
             // Must be signed first
-            router.push(`/sign/${params.token}`);
+            router.push(`/sign/${token}`);
           }
         } else {
           toast({
@@ -53,34 +113,122 @@ export default function PaymentPage() {
       }
     }
 
-    if (params.token) {
-      fetchContract();
-    }
-  }, [params.token, router, toast]);
+    fetchContract();
+  }, [isMounted, params, router, toast]);
 
   const handlePayment = async () => {
-    if (!contract || contract.depositAmount <= 0) return;
+    if (!contract) return;
+    
+    // Calculate payment amount - use remaining balance if contract is already paid, otherwise use deposit
+    const totalPaid = payments
+      .filter((p: any) => p.status === "completed")
+      .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+    const calculatedRemainingBalance = (contract.totalAmount || 0) - totalPaid;
+    const isRemainingBalancePayment = contract.status === "paid" || totalPaid > 0;
+    const paymentAmount = isRemainingBalancePayment && calculatedRemainingBalance > 0.01
+      ? calculatedRemainingBalance
+      : contract.depositAmount;
+    
+    if (paymentAmount <= 0) {
+      toast({
+        title: "No Payment Required",
+        description: "This contract is already fully paid.",
+        variant: "default",
+      });
+      return;
+    }
+
+    const token = params?.token as string | undefined;
+    if (!token) {
+      toast({
+        title: "Error",
+        description: "Invalid payment link",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate email if provided
+    const emailToUse = clientEmail.trim();
+    if (emailToUse && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToUse)) {
+      toast({
+        title: "Invalid Email",
+        description: "Please enter a valid email address",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!emailToUse) {
+      toast({
+        title: "Email Required",
+        description: "Please enter your email address to continue",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsProcessing(true);
     try {
       // Create Stripe checkout session
-      const response = await fetch("/api/stripe/create-checkout", {
+      // Use absolute URL to avoid Next.js routing issues
+      const apiUrl = typeof window !== "undefined" 
+        ? `${window.location.origin}/api/stripe/create-checkout`
+        : "/api/stripe/create-checkout";
+      console.log("Calling create-checkout API:", apiUrl, { contractId: contract.id, hasToken: !!token });
+      
+      console.log("Sending payment request:", {
+        contractId: contract.id,
+        hasClient: !!client,
+        clientEmail: emailToUse,
+        depositAmount: contract.depositAmount,
+      });
+      
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contractId: contract.id,
-          signingToken: params.token,
+          signingToken: token,
           amount: contract.depositAmount,
           currency: "usd",
+          // Pass client email from input field
+          clientEmail: emailToUse,
         }),
       });
 
+      console.log("Create-checkout response status:", response.status, response.statusText);
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to create payment session");
+        let errorMessage = "Failed to create payment session";
+        let errorData: any = null;
+        try {
+          errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+          console.error("Payment API error:", {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData,
+          });
+        } catch (e) {
+          // If response isn't JSON, use status text
+          const responseText = await response.text().catch(() => "");
+          console.error("Payment API error (non-JSON):", {
+            status: response.status,
+            statusText: response.statusText,
+            body: responseText.substring(0, 200),
+          });
+          errorMessage = response.status === 404 
+            ? "Payment service is not available. Please try again in a moment."
+            : `Server error (${response.status})`;
+        }
+        throw new Error(errorMessage);
       }
 
       const { sessionId } = await response.json();
+      
+      // Dynamically import Stripe to avoid SSR issues
+      const { getStripe } = await import("@/lib/stripe");
       const stripe = await getStripe();
 
       if (!stripe) {
@@ -105,7 +253,8 @@ export default function PaymentPage() {
     }
   };
 
-  if (isLoading) {
+  // Show loading state until mounted (prevents SSR issues)
+  if (!isMounted || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -260,6 +409,26 @@ export default function PaymentPage() {
                   <p className="text-xs text-purple-700 mt-1">Contract finalized instantly</p>
                 </div>
               </div>
+            </div>
+
+            {/* Email Input */}
+            <div className="space-y-2">
+              <Label htmlFor="client-email" className="text-slate-700 font-semibold flex items-center gap-2">
+                <Mail className="h-4 w-4" />
+                Email Address
+              </Label>
+              <Input
+                id="client-email"
+                type="email"
+                placeholder="your.email@example.com"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                className="h-12 text-base text-slate-900 bg-white border-2 border-slate-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+                required
+              />
+              <p className="text-xs text-slate-500">
+                We&apos;ll send your payment receipt to this email address
+              </p>
             </div>
 
             {/* Security Notice */}

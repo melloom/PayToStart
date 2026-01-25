@@ -91,6 +91,9 @@ export async function GET(request: Request) {
             depositAmount: contract.depositAmount,
             totalAmount: contract.totalAmount,
             remainingBalance: contract.totalAmount - contract.depositAmount,
+            paymentUrl: contract.signingToken 
+              ? `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/pay/${contract.signingToken}`
+              : null,
           }
         : null,
       paymentMethod: paymentMethodInfo,

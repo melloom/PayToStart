@@ -243,7 +243,14 @@ interface ContractPDFProps {
     companyLogo?: string | null;
     companyAddress?: string | null;
   };
-  signature?: {
+  clientSignature?: {
+    full_name: string;
+    signature_url?: string | null;
+    ip_address?: string | null;
+    contract_hash?: string | null;
+    signed_at?: string;
+  } | null;
+  contractorSignature?: {
     full_name: string;
     signature_url?: string | null;
     ip_address?: string | null;
@@ -261,13 +268,21 @@ export function ContractPDF({
   contract,
   client,
   contractor,
-  signature,
+  clientSignature,
+  contractorSignature,
   payment,
   branding,
 }: ContractPDFProps) {
-  const signedName = signature?.full_name || client.name;
-  const signedDate = signature?.signed_at
-    ? new Date(signature.signed_at).toLocaleDateString()
+  const clientSignedName = clientSignature?.full_name || client.name;
+  const clientSignedDate = clientSignature?.signed_at
+    ? new Date(clientSignature.signed_at).toLocaleDateString()
+    : contract.signedAt
+    ? new Date(contract.signedAt).toLocaleDateString()
+    : "Not signed";
+
+  const contractorSignedName = contractorSignature?.full_name || contractor.name;
+  const contractorSignedDate = contractorSignature?.signed_at
+    ? new Date(contractorSignature.signed_at).toLocaleDateString()
     : contract.signedAt
     ? new Date(contract.signedAt).toLocaleDateString()
     : "Not signed";
@@ -626,24 +641,24 @@ export function ContractPDF({
         <View style={styles.signatureSection}>
           <View style={styles.signatureBlock}>
             <Text style={styles.signatureLabel}>Client Signature:</Text>
-            {signature?.signature_url && signature.signature_url.trim() !== "" && (
+            {clientSignature?.signature_url && clientSignature.signature_url.trim() !== "" && (
               <Image
-                src={signature.signature_url}
+                src={clientSignature.signature_url}
                 style={styles.signatureImage}
               />
             )}
             <View style={styles.signatureLine} />
-            <Text style={styles.signatureName}>{signedName}</Text>
-            <Text style={styles.signatureDate}>Date: {signedDate}</Text>
-            {signature?.signed_at && (
+            <Text style={styles.signatureName}>{clientSignedName}</Text>
+            <Text style={styles.signatureDate}>Date: {clientSignedDate}</Text>
+            {clientSignature?.signed_at && (
               <Text style={styles.signatureTime}>
-                Time: {new Date(signature.signed_at).toLocaleTimeString()}
+                Time: {new Date(clientSignature.signed_at).toLocaleTimeString()}
               </Text>
             )}
-            {signature && (
+            {clientSignature && (
               <Text style={styles.signatureMetadata}>
-                IP: {signature.ip_address || "N/A"} | Contract Hash:{" "}
-                {signature.contract_hash?.slice(0, 16)}...
+                IP: {clientSignature.ip_address || "N/A"} | Contract Hash:{" "}
+                {clientSignature.contract_hash?.slice(0, 16)}...
               </Text>
             )}
           </View>
@@ -651,11 +666,28 @@ export function ContractPDF({
           {/* Contractor Signature */}
           <View style={styles.signatureBlock}>
             <Text style={styles.signatureLabel}>Contractor Signature:</Text>
+            {contractorSignature?.signature_url && contractorSignature.signature_url.trim() !== "" && (
+              <Image
+                src={contractorSignature.signature_url}
+                style={styles.signatureImage}
+              />
+            )}
             <View style={styles.signatureLine} />
-            <Text style={styles.signatureName}>{contractor.name}</Text>
+            <Text style={styles.signatureName}>{contractorSignedName}</Text>
             <Text style={styles.signatureDate}>
-              Date: {signedDate}
+              Date: {contractorSignedDate}
             </Text>
+            {contractorSignature?.signed_at && (
+              <Text style={styles.signatureTime}>
+                Time: {new Date(contractorSignature.signed_at).toLocaleTimeString()}
+              </Text>
+            )}
+            {contractorSignature && (
+              <Text style={styles.signatureMetadata}>
+                IP: {contractorSignature.ip_address || "N/A"} | Contract Hash:{" "}
+                {contractorSignature.contract_hash?.slice(0, 16)}...
+              </Text>
+            )}
           </View>
         </View>
 

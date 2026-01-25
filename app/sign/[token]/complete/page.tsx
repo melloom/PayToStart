@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle, FileText, Mail, Download, Loader2, CreditCard } from "lucide-react";
@@ -22,24 +22,67 @@ export default function SignCompletePage() {
   const sessionId = searchParams.get("session_id");
   const token = params.token as string;
 
-  useEffect(() => {
-    // Verify payment status if session ID is provided
-    if (sessionId) {
-      verifyPayment();
-    } else {
-      setIsVerifying(false);
+  const handleDownloadPDF = useCallback(async () => {
+    if (!token) return;
+    
+    setIsDownloading(true);
+    try {
+      // URL encode the token to handle special characters
+      const encodedToken = encodeURIComponent(token);
+      const response = await fetch(`/api/contracts/download-pdf/${encodedToken}`);
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `contract-${token.slice(0, 8)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        const error = await response.json().catch(() => ({ message: "Failed to download PDF" }));
+        alert(error.message || "Failed to download PDF");
+      }
+    } catch (error) {
+      console.error("Error downloading PDF:", error);
+      alert("Failed to download PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
     }
-  }, [sessionId]);
+  }, [token]);
 
-  const verifyPayment = async () => {
+  const verifyPayment = useCallback(async () => {
+    if (!sessionId) return;
+    
     try {
       const response = await fetch(`/api/stripe/verify-session?session_id=${sessionId}`);
       if (response.ok) {
         const data = await response.json();
         setPaymentStatus(data.paid ? "paid" : "pending");
-        setContract(data.contract);
+        // Ensure contract data is set with all required fields
+        if (data.contract) {
+          setContract({
+            id: data.contract.id,
+            status: data.contract.status,
+            title: data.contract.title,
+            depositAmount: data.contract.depositAmount || 0,
+            totalAmount: data.contract.totalAmount || 0,
+            remainingBalance: data.contract.remainingBalance || ((data.contract.totalAmount || 0) - (data.contract.depositAmount || 0)),
+            paymentUrl: data.contract.paymentUrl || (token ? `${window.location.origin}/pay/${token}` : null),
+          });
+        }
         setPaymentMethod(data.paymentMethod);
         setCustomerId(data.customerId);
+        
+        // Auto-download PDF when payment is completed
+        if (data.paid && token) {
+          // Wait a moment for PDF to be generated, then download
+          setTimeout(() => {
+            handleDownloadPDF();
+          }, 2000);
+        }
         
         // Show save card dialog if payment was successful, has payment method, and has remaining balance
         if (data.paid && data.paymentMethod && data.hasRemainingBalance && data.customerId) {
@@ -52,7 +95,62 @@ export default function SignCompletePage() {
     } finally {
       setIsVerifying(false);
     }
-  };
+  }, [sessionId, token, handleDownloadPDF]);
+
+  const fetchContractData = useCallback(async () => {
+    if (!token) {
+      setIsVerifying(false);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/contracts/sign/${token}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.contract) {
+          const contractData = {
+            id: data.contract.id,
+            status: data.contract.status,
+            title: data.contract.title || "Contract",
+            depositAmount: Number(data.contract.depositAmount) || 0,
+            totalAmount: Number(data.contract.totalAmount) || 0,
+            remainingBalance: (Number(data.contract.totalAmount) || 0) - (Number(data.contract.depositAmount) || 0),
+            paymentUrl: token ? `${window.location.origin}/pay/${token}` : null,
+          };
+          console.log("Contract data fetched:", contractData);
+          setContract(contractData);
+          
+          // Check if contract is paid
+          if (data.contract.status === "paid" || data.contract.status === "completed") {
+            setPaymentStatus("paid");
+          }
+        } else {
+          console.error("No contract data in API response:", data);
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
+        console.error("Failed to fetch contract data:", errorData);
+      }
+    } catch (error) {
+      console.error("Error fetching contract:", error);
+    } finally {
+      setIsVerifying(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    // Always fetch contract data first to ensure we have it
+    if (token) {
+      fetchContractData();
+    }
+    
+    // Then verify payment status if session ID is provided
+    if (sessionId) {
+      verifyPayment();
+    } else if (!token) {
+      setIsVerifying(false);
+    }
+  }, [sessionId, token, verifyPayment, fetchContractData]);
 
   const handleSaveCard = async () => {
     if (!paymentMethod || !customerId || !contract) return;
@@ -83,34 +181,6 @@ export default function SignCompletePage() {
       alert("Failed to save card. You can still pay manually later.");
     } finally {
       setIsSavingCard(false);
-    }
-  };
-
-  const handleDownloadPDF = async () => {
-    if (!token) return;
-    
-    setIsDownloading(true);
-    try {
-      const response = await fetch(`/api/contracts/download-pdf/${token}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `contract-${token.slice(0, 8)}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        const error = await response.json();
-        alert(error.message || "Failed to download PDF");
-      }
-    } catch (error) {
-      console.error("Error downloading PDF:", error);
-      alert("Failed to download PDF. Please try again.");
-    } finally {
-      setIsDownloading(false);
     }
   };
 
@@ -272,12 +342,17 @@ export default function SignCompletePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
+            
             <div className="flex items-start gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
               <Mail className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-semibold text-green-900 mb-1">Email Confirmation</p>
                 <p className="text-sm text-green-800">
-                  A finalized copy of your contract has been sent to your email address. 
+                  A finalized copy of your contract has been sent to your email address.
+                  {paymentStatus === "paid" && (
+                    <> A payment receipt has also been sent to your email.</>
+                  )}
+                  <br />
                   Check your inbox (and spam folder) for the confirmation.
                 </p>
               </div>
@@ -308,10 +383,76 @@ export default function SignCompletePage() {
                     </>
                   )}
                 </Button>
+                {paymentStatus === "paid" && (
+                  <p className="text-sm text-blue-700 mt-3 flex items-center gap-1">
+                    <Mail className="h-3 w-3" />
+                    A receipt was sent also to your email address.
+                  </p>
+                )}
               </div>
             </div>
 
-            {paymentStatus === "paid" && (
+            {/* Payment Summary - Always show if contract data exists */}
+            {contract && contract.id && (
+              <div className="flex items-start gap-4 p-4 bg-amber-50 border-2 border-amber-200 rounded-lg">
+                <CreditCard className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold text-amber-900 mb-2">Payment Summary</p>
+                  <div className="space-y-2 mb-3">
+                    {(contract.totalAmount || 0) > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-amber-800">Total Contract Amount:</span>
+                        <span className="font-semibold text-amber-900">${(contract.totalAmount || 0).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {(contract.depositAmount || 0) > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-amber-800">Deposit Paid:</span>
+                        <span className="font-semibold text-green-600">-${(contract.depositAmount || 0).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {((contract.totalAmount || 0) - (contract.depositAmount || 0)) > 0 && (
+                      <div className="border-t border-amber-300 pt-2 mt-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-amber-900">Remaining Balance:</span>
+                          <span className="text-lg font-bold text-amber-900">
+                            ${((contract.totalAmount || 0) - (contract.depositAmount || 0)).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {((contract.totalAmount || 0) - (contract.depositAmount || 0)) <= 0 && (
+                      <div className="border-t border-amber-300 pt-2 mt-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-green-700">Status:</span>
+                          <span className="text-lg font-bold text-green-700">Fully Paid ✅</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {((contract.totalAmount || 0) - (contract.depositAmount || 0)) > 0 && (
+                    <>
+                      <p className="text-sm text-amber-800 mb-3">
+                        The remaining balance will be due according to your contract terms. You'll receive a payment link via email when it's time to pay.
+                      </p>
+                      {contract.paymentUrl && (
+                        <Button
+                          asChild
+                          className="bg-amber-600 hover:bg-amber-700 text-white w-full sm:w-auto"
+                        >
+                          <Link href={contract.paymentUrl}>
+                            <CreditCard className="h-4 w-4 mr-2" />
+                            Pay Remaining Balance Now
+                          </Link>
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {paymentStatus === "paid" && contract && (
               <div className="flex items-start gap-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                 <CheckCircle className="h-5 w-5 text-purple-600 flex-shrink-0 mt-0.5" />
                 <div>

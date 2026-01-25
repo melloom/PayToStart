@@ -100,13 +100,146 @@ export async function createDepositCheckoutSession(
   });
 
   // Create payment record in database
-  await db.payments.create({
-    contractId: contract.id,
-    companyId: contract.companyId,
-    amount: contract.depositAmount,
-    status: "pending",
-    paymentIntentId: session.id, // Store session ID
+  try {
+    await db.payments.create({
+      contractId: contract.id,
+      companyId: contract.companyId,
+      amount: contract.depositAmount,
+      status: "pending",
+      paymentIntentId: session.id, // Store session ID
+    });
+  } catch (paymentError: any) {
+    // Log error but don't fail checkout session creation
+    // Payment record can be created later via webhook
+    console.error("Failed to create payment record:", {
+      error: paymentError.message,
+      stack: paymentError.stack,
+      contractId: contract.id,
+    });
+    // Continue - the webhook will create the payment record when payment completes
+  }
+
+  return session;
+}
+
+/**
+ * Create a Stripe Checkout Session for remaining balance payment
+ */
+export async function createRemainingBalanceCheckoutSession(
+  contract: Contract,
+  clientEmail: string,
+  signingToken: string
+) {
+  // Calculate actual remaining balance from payments
+  const payments = await db.payments.findByContractId(contract.id);
+  const totalPaid = payments
+    .filter((p) => p.status === "completed")
+    .reduce((sum, p) => sum + Number(p.amount), 0);
+  
+  const remainingBalance = contract.totalAmount - totalPaid;
+
+  if (remainingBalance <= 0.01) {
+    throw new Error("No remaining balance to pay");
+  }
+
+  if (contract.status !== "signed" && contract.status !== "paid") {
+    throw new Error("Contract must be signed before payment");
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Get or create Stripe customer for saving payment methods
+  let customerId: string | null = null;
+  try {
+    // Try to find existing customer by email
+    const existingCustomers = await stripe.customers.list({
+      email: clientEmail,
+      limit: 1,
+    });
+    
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
+    } else {
+      // Create new customer
+      const customer = await stripe.customers.create({
+        email: clientEmail,
+        metadata: {
+          contractId: contract.id,
+          companyId: contract.companyId,
+        },
+      });
+      customerId = customer.id;
+    }
+  } catch (error) {
+    console.error("Error creating/finding customer:", error);
+    // Continue without customer - payment method won't be saved
+  }
+
+  // Create Stripe Checkout Session for remaining balance
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `Remaining Balance for ${contract.title}`,
+            description: `Final payment for Contract #${contract.id.slice(0, 8)} - Remaining balance`,
+          },
+          unit_amount: Math.round(remainingBalance * 100), // Convert to cents
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: `${baseUrl}/sign/${signingToken}/complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/pay/${signingToken}?canceled=1`,
+    customer: customerId || undefined,
+    customer_email: customerId ? undefined : clientEmail,
+    metadata: {
+      contractId: contract.id,
+      contract_id: contract.id,
+      signingToken: signingToken,
+      companyId: contract.companyId,
+      company_id: contract.companyId,
+      type: "remaining_balance",
+      customerId: customerId || "",
+      remainingBalance: remainingBalance.toFixed(2),
+    },
+    payment_intent_data: {
+      setup_future_usage: "off_session",
+      metadata: {
+        contractId: contract.id,
+        contract_id: contract.id,
+        signingToken: signingToken,
+        companyId: contract.companyId,
+        company_id: contract.companyId,
+        type: "remaining_balance",
+        customerId: customerId || "",
+        remainingBalance: remainingBalance.toFixed(2),
+      },
+    },
+    allow_promotion_codes: true,
+    billing_address_collection: "auto",
   });
+
+  // Create payment record in database
+  try {
+    await db.payments.create({
+      contractId: contract.id,
+      companyId: contract.companyId,
+      amount: remainingBalance,
+      status: "pending",
+      paymentIntentId: session.id,
+    });
+  } catch (paymentError: any) {
+    console.error("Failed to create payment record:", {
+      error: paymentError.message,
+      stack: paymentError.stack,
+      contractId: contract.id,
+    });
+    // Continue - the webhook will create the payment record when payment completes
+  }
 
   return session;
 }
@@ -132,17 +265,36 @@ export async function processCompletedCheckoutSession(
     throw new Error(`Contract not found: ${contractId}`);
   }
 
-  // Verify contract is signed
-  if (contract.status !== "signed") {
+  // Verify contract is signed or paid
+  if (contract.status !== "signed" && contract.status !== "paid") {
     throw new Error(`Contract not signed. Current status: ${contract.status}`);
   }
 
-  // Verify payment amount matches deposit
+  // Determine payment type from metadata
+  const paymentType = session.metadata?.type || "deposit";
   const paymentAmount = (session.amount_total || 0) / 100;
-  if (Math.abs(paymentAmount - contract.depositAmount) > 0.01) {
-    throw new Error(
-      `Payment amount mismatch. Expected: $${contract.depositAmount}, Received: $${paymentAmount}`
-    );
+
+  // Verify payment amount based on type
+  if (paymentType === "remaining_balance") {
+    // For remaining balance, calculate actual remaining balance
+    const payments = await db.payments.findByContractId(contractId);
+    const totalPaid = payments
+      .filter((p) => p.status === "completed")
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const remainingBalance = contract.totalAmount - totalPaid;
+    
+    if (Math.abs(paymentAmount - remainingBalance) > 0.01) {
+      throw new Error(
+        `Payment amount mismatch. Expected remaining balance: $${remainingBalance.toFixed(2)}, Received: $${paymentAmount}`
+      );
+    }
+  } else {
+    // For deposit, verify against deposit amount
+    if (Math.abs(paymentAmount - contract.depositAmount) > 0.01) {
+      throw new Error(
+        `Payment amount mismatch. Expected deposit: $${contract.depositAmount}, Received: $${paymentAmount}`
+      );
+    }
   }
 
   // Verify payment status
@@ -191,11 +343,31 @@ export async function processCompletedCheckoutSession(
     });
   }
 
-  // Update contract status to paid
-  const updatedContract = await db.contracts.update(contractId, {
-    status: "paid",
-    paidAt: new Date(),
-  });
+  // Calculate total paid after this payment
+  const allPayments = await db.payments.findByContractId(contractId);
+  const totalPaid = allPayments
+    .filter((p) => p.status === "completed")
+    .reduce((sum, p) => sum + Number(p.amount), 0);
+  
+  // Check if contract is fully paid
+  const isFullyPaid = totalPaid >= contract.totalAmount - 0.01; // Allow small rounding differences
+
+  // Update contract status
+  let updatedContract;
+  if (isFullyPaid) {
+    // Contract is fully paid - mark as completed
+    updatedContract = await db.contracts.update(contractId, {
+      status: "completed",
+      paidAt: new Date(),
+      completedAt: new Date(),
+    });
+  } else {
+    // Still has remaining balance - mark as paid (deposit received)
+    updatedContract = await db.contracts.update(contractId, {
+      status: "paid",
+      paidAt: new Date(),
+    });
+  }
 
   if (!updatedContract) {
     throw new Error("Failed to update contract status");
@@ -231,6 +403,7 @@ export async function processCompletedCheckoutSession(
     payment,
     receiptId,
     receiptUrl,
+    isFullyPaid,
   };
 }
 

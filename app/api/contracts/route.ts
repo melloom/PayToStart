@@ -228,6 +228,10 @@ export async function POST(request: NextRequest) {
       ...(data.paymentScheduleConfig ? { paymentScheduleConfig: data.paymentScheduleConfig } : {}),
       // Store branding/styling settings for PDF generation (from body, not validated data)
       ...((body as any).branding ? { _branding: (body as any).branding } : {}),
+      // ALWAYS store client email in fieldValues for easy access later
+      clientEmail: client?.email || sanitizedEmail || null,
+      // Store client name if available
+      ...(clientName ? { clientName: clientName } : {}),
     };
 
     // Hash password if provided

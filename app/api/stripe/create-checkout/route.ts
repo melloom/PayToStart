@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { createDepositCheckoutSession } from "@/lib/payments";
+import { createDepositCheckoutSession, createRemainingBalanceCheckoutSession } from "@/lib/payments";
 import { hashToken, verifyToken, isTokenExpired } from "@/lib/security/tokens";
 import { log } from "@/lib/logger";
+
+// Route segment config
+export const dynamic = "force-dynamic";
 
 // Helper to verify token for contract access (allows access if signed even if token was used)
 async function verifyContractToken(token: string): Promise<{ contract: any; error?: string }> {
@@ -88,9 +91,20 @@ async function verifyContractToken(token: string): Promise<{ contract: any; erro
 }
 
 export async function POST(request: Request) {
+  // Log that the route was hit
+  console.log("[CREATE-CHECKOUT] Route called");
+  log.info({}, "Create-checkout route called");
+  
   try {
+    // Parse body once and reuse
     const body = await request.json();
-    const { contractId, signingToken, amount, currency } = body;
+    const { contractId, signingToken, amount, currency, clientEmail: requestClientEmail } = body;
+
+    console.log("[CREATE-CHECKOUT] Request body:", {
+      hasContractId: !!contractId,
+      hasToken: !!signingToken,
+      hasClientEmail: !!requestClientEmail,
+    });
 
     if (!contractId || !signingToken) {
       log.warn({ contractId: !!contractId, hasToken: !!signingToken }, "Missing required fields in create-checkout");
@@ -113,12 +127,19 @@ export async function POST(request: Request) {
         contractId,
         tokenPrefix: signingToken?.substring(0, 16),
         error,
-      }, "Token verification failed in create-checkout");
+        hasContract: !!contract,
+      }, "Token verification failed in create-checkout - returning 404");
       return NextResponse.json(
         { message: error || "Contract not found" },
         { status: 404 }
       );
     }
+
+    log.info({
+      contractId: contract.id,
+      contractStatus: contract.status,
+      clientId: contract.clientId,
+    }, "Contract verified successfully");
 
     // Verify contract ID matches
     if (contract.id !== contractId) {
@@ -128,31 +149,212 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get client information
-    const client = await db.clients.findById(contract.clientId);
+    // Get client information - try database first
+    let client = await db.clients.findById(contract.clientId).catch(() => null);
+    
+    // If client not found in database, get email from fieldValues (always stored there)
+    let clientEmail: string | null = null;
     if (!client) {
-      return NextResponse.json(
-        { message: "Client not found" },
-        { status: 404 }
-      );
+      log.warn({ contractId: contract.id, clientId: contract.clientId }, "Client not found in database, getting email from fieldValues");
+      
+      // PRIORITY 1: Get email from contract events (the email the contract was actually sent to)
+      // Use the MOST RECENT "sent" event in case contract was resent to a different email
+      try {
+        const events = await db.contractEvents.findByContractId(contract.id);
+        // Find ALL "sent" events with clientEmail, then get the most recent one
+        const sentEvents = events
+          .filter(e => e.eventType === "sent" && e.metadata?.clientEmail)
+          .sort((a, b) => {
+            // Sort by createdAt descending (most recent first)
+            const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+            const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          });
+        
+        if (sentEvents.length > 0) {
+          const mostRecentSentEvent = sentEvents[0];
+          if (mostRecentSentEvent.metadata?.clientEmail && typeof mostRecentSentEvent.metadata.clientEmail === "string") {
+            clientEmail = mostRecentSentEvent.metadata.clientEmail.trim();
+            log.info({ 
+              contractId: contract.id, 
+              clientEmail,
+              eventCount: sentEvents.length,
+              usingMostRecent: true
+            }, "Using client email from most recent contract 'sent' event (recipient email)");
+          }
+        }
+      } catch (error: any) {
+        log.warn({ contractId: contract.id, error: error.message }, "Failed to fetch contract events for email lookup");
+      }
+      
+      // PRIORITY 2: Try to get email from request body (payment page might pass it)
+      if (!clientEmail && requestClientEmail && typeof requestClientEmail === "string" && requestClientEmail.trim()) {
+        clientEmail = requestClientEmail.trim();
+        log.info({ contractId: contract.id, clientEmail }, "Using client email from request body");
+      }
+      
+      // PRIORITY 3: Try to extract from contract fieldValues
+      if (!clientEmail && contract.fieldValues && typeof contract.fieldValues === "object") {
+        const fieldValues = contract.fieldValues as Record<string, any>;
+        
+        // First, try common field names that might contain email
+        const emailFields = [
+          "clientEmail", 
+          "email", 
+          "client_email", 
+          "clientEmailAddress",
+          "emailAddress",
+          "email_address",
+          "contactEmail",
+          "contact_email",
+          "recipientEmail",
+          "recipient_email"
+        ];
+        
+        for (const field of emailFields) {
+          const value = fieldValues[field];
+          if (value && typeof value === "string" && value.trim()) {
+            // Basic email validation
+            if (value.includes("@") && value.includes(".")) {
+              clientEmail = value.trim();
+              log.info({ contractId: contract.id, clientEmail, field }, "Extracted client email from contract fieldValues");
+              break;
+            }
+          }
+        }
+        
+        // If still no email, search all field values for email-like patterns
+        if (!clientEmail) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          for (const [key, value] of Object.entries(fieldValues)) {
+            if (value && typeof value === "string" && value.trim()) {
+              const trimmedValue = value.trim();
+              // Check if the value looks like an email
+              if (emailRegex.test(trimmedValue)) {
+                clientEmail = trimmedValue;
+                log.info({ contractId: contract.id, clientEmail, field: key }, "Extracted client email from contract fieldValues (pattern match)");
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      // PRIORITY 4: As a last resort, try to extract email from contract content (less reliable)
+      if (!clientEmail && contract.content && typeof contract.content === "string") {
+        const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+        const matches = contract.content.match(emailRegex);
+        if (matches && matches.length > 0) {
+          // Use the first email found (could be contractor email, but better than nothing)
+          clientEmail = matches[0];
+          log.info({ contractId: contract.id, clientEmail }, "Extracted email from contract content (fallback)");
+        }
+      }
+      
+      if (!clientEmail) {
+        // Log detailed information for debugging
+        const debugInfo = {
+          contractId: contract.id,
+          clientId: contract.clientId,
+          hasRequestEmail: !!requestClientEmail,
+          requestEmailValue: requestClientEmail ? String(requestClientEmail).substring(0, 20) + "..." : null,
+          hasFieldValues: !!contract.fieldValues,
+          fieldValueKeys: contract.fieldValues && typeof contract.fieldValues === "object" 
+            ? Object.keys(contract.fieldValues) 
+            : [],
+          fieldValueSample: contract.fieldValues && typeof contract.fieldValues === "object"
+            ? Object.entries(contract.fieldValues)
+                .slice(0, 5)
+                .reduce((acc, [key, value]) => {
+                  acc[key] = typeof value === "string" ? value.substring(0, 50) : String(value).substring(0, 50);
+                  return acc;
+                }, {} as Record<string, string>)
+            : null,
+          hasContent: !!contract.content,
+          contentLength: contract.content ? contract.content.length : 0,
+        };
+        
+        log.error(debugInfo, "Could not determine client email for checkout");
+        
+        return NextResponse.json(
+          { 
+            message: "Client information not found. Please contact the contractor.",
+            debug: process.env.NODE_ENV === "development" ? debugInfo : undefined
+          },
+          { status: 404 }
+        );
+      }
+      
+      // If we found an email but no client record, create the client record
+      try {
+        log.info({ contractId: contract.id, clientEmail, companyId: contract.companyId }, "Creating missing client record");
+        client = await db.clients.create({
+          companyId: contract.companyId,
+          email: clientEmail,
+          name: contract.fieldValues && typeof contract.fieldValues === "object" 
+            ? (contract.fieldValues.clientName || contract.fieldValues.name || "Client")
+            : "Client",
+        });
+        log.info({ contractId: contract.id, clientId: client.id }, "Client record created successfully");
+      } catch (createError: any) {
+        // If create fails (e.g., duplicate email), try to find by email
+        log.warn({ contractId: contract.id, error: createError.message }, "Failed to create client, trying to find by email");
+        try {
+          client = await db.clients.findByEmail(clientEmail, contract.companyId);
+          if (client) {
+            log.info({ contractId: contract.id, clientId: client.id }, "Found existing client by email");
+          }
+        } catch (findError: any) {
+          log.warn({ contractId: contract.id, error: findError.message }, "Failed to find or create client, continuing with email only");
+          // Continue anyway - we have the email to use for checkout
+        }
+      }
+    } else {
+      clientEmail = client.email;
     }
 
-    // Create checkout session using payment utility
-    const session = await createDepositCheckoutSession(
-      contract,
-      client.email,
-      signingToken
-    );
-
+    // Check contract status before creating checkout
     log.info({
       contractId: contract.id,
-      sessionId: session.id,
-    }, "Checkout session created successfully");
+      contractStatus: contract.status,
+      depositAmount: contract.depositAmount,
+    }, "Contract details before checkout creation");
 
-    return NextResponse.json({
-      sessionId: session.id,
-      url: session.url, // Include session URL for debugging
-    });
+    // Create checkout session using payment utility
+    try {
+      const session = await createDepositCheckoutSession(
+        contract,
+        clientEmail!,
+        signingToken
+      );
+
+      log.info({
+        contractId: contract.id,
+        sessionId: session.id,
+      }, "Checkout session created successfully");
+
+      return NextResponse.json({
+        sessionId: session.id,
+        url: session.url, // Include session URL for debugging
+      });
+    } catch (checkoutError: any) {
+      log.error({
+        contractId: contract.id,
+        contractStatus: contract.status,
+        error: checkoutError.message,
+      }, "Error in createDepositCheckoutSession");
+      
+      // Return appropriate error based on the issue
+      if (checkoutError.message.includes("must be signed")) {
+        return NextResponse.json(
+          { message: "Contract must be signed before payment can be processed" },
+          { status: 400 }
+        );
+      }
+      
+      throw checkoutError; // Re-throw to be caught by outer catch
+    }
+
   } catch (error: any) {
     log.error({
       error: error.message,
@@ -166,3 +368,11 @@ export async function POST(request: Request) {
   }
 }
 
+
+// Add a simple GET handler to test if route is accessible
+export async function GET() {
+  return NextResponse.json({ 
+    message: "Create checkout route is accessible",
+    method: "POST required"
+  });
+}

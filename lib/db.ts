@@ -563,7 +563,10 @@ export const db = {
 
   payments: {
     async findByContractId(contractId: string): Promise<Payment[]> {
-      const supabase = await createClient();
+      // Use service role client to bypass RLS for payment queries
+      // Payments are queried from webhooks and server-side operations where there's no authenticated user
+      const { createServiceClient } = await import("./supabase/service");
+      const supabase = createServiceClient();
       const { data, error } = await supabase
         .from("payments")
         .select("*")
@@ -575,26 +578,40 @@ export const db = {
     },
 
     async create(data: Omit<Payment, "id" | "createdAt">): Promise<Payment> {
-      const supabase = await createClient();
-      const { data: payment, error } = await supabase
-        .from("payments")
-        .insert({
-          company_id: data.companyId,
-          contract_id: data.contractId,
-          amount: data.amount,
-          status: data.status,
-          payment_intent_id: data.paymentIntentId,
-          completed_at: data.completedAt,
-        })
-        .select()
-        .single();
+      // Use service role client to bypass RLS for payment creation
+      // Payments are created from webhooks and server-side operations where there's no authenticated user
+      try {
+        const { createServiceClient } = await import("./supabase/service");
+        const supabase = createServiceClient();
+        const { data: payment, error } = await supabase
+          .from("payments")
+          .insert({
+            company_id: data.companyId,
+            contract_id: data.contractId,
+            amount: data.amount,
+            status: data.status,
+            payment_intent_id: data.paymentIntentId,
+            completed_at: data.completedAt,
+          })
+          .select()
+          .single();
 
-      if (error) throw error;
-      return mapPaymentFromDb(payment);
+        if (error) {
+          console.error("Payment creation error:", error);
+          throw error;
+        }
+        return mapPaymentFromDb(payment);
+      } catch (error: any) {
+        console.error("Error in payments.create:", error);
+        throw error;
+      }
     },
 
     async update(id: string, data: Partial<Payment>): Promise<Payment | null> {
-      const supabase = await createClient();
+      // Use service role client to bypass RLS for payment updates
+      // Payments are updated from webhooks and server-side operations where there's no authenticated user
+      const { createServiceClient } = await import("./supabase/service");
+      const supabase = createServiceClient();
       const updateData: any = {};
 
       if (data.status !== undefined) updateData.status = data.status;
