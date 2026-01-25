@@ -75,7 +75,7 @@ export default async function ContractDetailPage({
   const [client, signature, allSignatures, payments, effectiveTier, company] = await Promise.all([
     db.clients.findById(contract.clientId).catch(() => null),
     getSignature(contract.id).catch(() => null),
-    getAllSignatures(contract.id, contract.clientId, contract.contractorId).catch(() => ({ clientSignature: null, contractorSignature: null })),
+    getAllSignatures(contract.id).catch(() => ({ clientSignature: null, contractorSignature: null })),
     db.payments.findByContractId(contract.id).catch(() => []),
     getEffectiveTier(contractor.companyId),
     db.companies.findById(contractor.companyId).catch(() => null),
