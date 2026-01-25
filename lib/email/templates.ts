@@ -1,6 +1,9 @@
 // Email templates for contract lifecycle events
 // Using Gmail SMTP for email delivery
 
+// Contact email for support inquiries
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "contact@mellowsites.com";
+
 export interface EmailTemplateData {
   contractTitle: string;
   contractorName: string;
@@ -73,7 +76,7 @@ export function getContractLinkEmail(data: EmailTemplateData): { subject: string
           
           <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;">
             <p style="font-size: 14px; color: #6b7280; margin: 0;">
-              If you have any questions, please contact ${data.contractorName}${data.contractorEmail ? ` at ${data.contractorEmail}` : ""}.
+              If you have any questions, please contact us at ${CONTACT_EMAIL}.
             </p>
           </div>
         </div>
@@ -144,7 +147,7 @@ export function getSignedButUnpaidEmail(data: EmailTemplateData): { subject: str
           
           <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;">
             <p style="font-size: 14px; color: #6b7280; margin: 0;">
-              If you have any questions, please contact ${data.contractorName}${data.contractorEmail ? ` at ${data.contractorEmail}` : ""}.
+              If you have any questions, please contact us at ${CONTACT_EMAIL}.
             </p>
           </div>
         </div>
@@ -224,9 +227,9 @@ export function getDepositReceivedEmail(
             <p style="font-size: 14px; color: #6b7280; margin: 0;">
               Thank you for your business!
             </p>
-            ${isClient && data.contractorEmail ? `
+            ${isClient ? `
             <p style="font-size: 14px; color: #6b7280; margin: 10px 0 0 0;">
-              If you have any questions, please contact ${data.contractorName} at ${data.contractorEmail}.
+              If you have any questions, please contact us at ${CONTACT_EMAIL}.
             </p>
             ` : ""}
           </div>
@@ -364,7 +367,7 @@ export function getReminderEmail(data: EmailTemplateData): { subject: string; ht
           
           <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;">
             <p style="font-size: 14px; color: #6b7280; margin: 0;">
-              If you have any questions, please contact ${data.contractorName}${data.contractorEmail ? ` at ${data.contractorEmail}` : ""}.
+              If you have any questions, please contact us at ${CONTACT_EMAIL}.
             </p>
           </div>
         </div>

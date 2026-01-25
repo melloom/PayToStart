@@ -79,11 +79,11 @@ export async function POST(
       );
     }
 
-    // Mark as paid (no payment needed) and finalize
+    // Mark as paid (no payment needed) and finalize - use service role for public token flow
     await db.contracts.update(contract.id, {
       status: "paid",
       paidAt: new Date(),
-    });
+    }, true); // true = use service role
 
     // Finalize the contract
     await finalizeContract(contract.id);

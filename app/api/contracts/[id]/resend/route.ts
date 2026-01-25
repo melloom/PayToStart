@@ -3,7 +3,7 @@ import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { getContractLinkEmail } from "@/lib/email/templates";
-import { hashPassword } from "@/lib/security/tokens";
+import { hashPassword, generateToken, hashToken, getTokenExpiry } from "@/lib/security/tokens";
 import { log } from "@/lib/logger";
 
 export async function POST(
@@ -28,7 +28,7 @@ export async function POST(
       );
     }
 
-    const { email, password } = await request.json();
+    const { email, password, paymentMethod } = await request.json();
     
     // Get client to get email if not provided
     let clientEmailToUse = email;
@@ -57,7 +57,34 @@ export async function POST(
       return NextResponse.json({ message: "Client not found" }, { status: 404 });
     }
 
-    const signingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/sign/${contract.signingToken}`;
+    // Ensure signing token exists - regenerate if missing or invalid
+    let signingToken = contract.signingToken;
+    let needsTokenUpdate = false;
+    
+    if (!signingToken || signingToken.trim() === "" || !contract.signingTokenHash) {
+      // Generate new secure token if missing or hash doesn't exist
+      log.warn({
+        contractId: contract.id,
+        hasToken: !!signingToken,
+        hasTokenHash: !!contract.signingTokenHash,
+      }, "Regenerating signing token for contract");
+      
+      signingToken = generateToken();
+      const tokenHash = hashToken(signingToken);
+      const tokenExpiry = getTokenExpiry(7); // 7 days expiry
+      
+      // Update contract with new token
+      await db.contracts.update(contract.id, {
+        signingToken,
+        signingTokenHash: tokenHash,
+        signingTokenExpiresAt: tokenExpiry,
+        signingTokenUsedAt: null, // Reset used status for new token
+      });
+      
+      needsTokenUpdate = true;
+    }
+
+    const signingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/sign/${signingToken}`;
 
     // Generate email using template
     const { subject, html } = getContractLinkEmail({
@@ -81,7 +108,7 @@ export async function POST(
       });
 
       // Update contract status from "draft" or "ready" to "sent" when sending
-      // Also update password hash if provided
+      // Also update password hash and payment method if provided
       const updateData: any = {
         status: "sent",
       };
@@ -89,23 +116,48 @@ export async function POST(
         updateData.passwordHash = passwordHash;
       }
       
+      // Save payment method to fieldValues if provided
+      if (paymentMethod && typeof paymentMethod === "string" && paymentMethod.trim()) {
+        const currentFieldValues = contract.fieldValues || {};
+        updateData.fieldValues = {
+          ...currentFieldValues,
+          paymentMethod: paymentMethod.trim(),
+          paymentMethodSetAt: new Date().toISOString(),
+        };
+      }
+      
       if (contract.status === "draft" || contract.status === "ready") {
         await db.contracts.update(contract.id, updateData);
-
-        // Log "sent" event
-        await db.contractEvents.logEvent({
-          contractId: contract.id,
-          eventType: "sent",
-          actorType: "contractor",
-          actorId: contractor.id,
+      } else if (paymentMethod && typeof paymentMethod === "string" && paymentMethod.trim()) {
+        // Even if status is already "sent", update payment method if provided
+        const currentFieldValues = contract.fieldValues || {};
+        await db.contracts.update(contract.id, {
+          fieldValues: {
+            ...currentFieldValues,
+            paymentMethod: paymentMethod.trim(),
+            paymentMethodSetAt: new Date().toISOString(),
+          },
         });
-
-        log.info({ 
-          contractId: contract.id,
-          contractorId: contractor.id,
-          clientEmail: clientEmailToUse,
-        }, "Contract sent to client");
       }
+
+      // Always log "sent" event when email is successfully sent
+      // This ensures the timeline shows the event even if contract was already sent before
+      await db.contractEvents.logEvent({
+        contractId: contract.id,
+        eventType: "sent",
+        actorType: "contractor",
+        actorId: contractor.id,
+        metadata: {
+          clientEmail: clientEmailToUse,
+          hasPassword: passwordHash !== undefined,
+        },
+      });
+
+      log.info({ 
+        contractId: contract.id,
+        contractorId: contractor.id,
+        clientEmail: clientEmailToUse,
+      }, "Contract sent to client");
     } catch (emailError: any) {
       console.error("Error sending email:", emailError);
       // Return error so user knows email failed

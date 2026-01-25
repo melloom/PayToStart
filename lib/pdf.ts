@@ -27,7 +27,7 @@ export async function generateContractPDF(
   // Get signed URL for signature image if it exists (for private storage)
   // Try to get from contracts bucket first, then fallback to signatures bucket
   let signatureImageUrl: string | null = null;
-  if (signature?.signature_url) {
+  if (signature?.signature_url && signature.signature_url.trim() !== "") {
     try {
       // Try to get from contracts bucket (new path)
       try {

@@ -626,7 +626,7 @@ export function ContractPDF({
         <View style={styles.signatureSection}>
           <View style={styles.signatureBlock}>
             <Text style={styles.signatureLabel}>Client Signature:</Text>
-            {signature?.signature_url && (
+            {signature?.signature_url && signature.signature_url.trim() !== "" && (
               <Image
                 src={signature.signature_url}
                 style={styles.signatureImage}

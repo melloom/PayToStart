@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { retrieveCheckoutSession } from "@/lib/payments";
 import { db } from "@/lib/db";
+import { stripe } from "@/lib/stripe";
 
 export async function GET(request: Request) {
   try {
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
       );
     }
 
-    // Retrieve the session from Stripe
+    // Retrieve the session from Stripe with expanded payment intent
     const session = await retrieveCheckoutSession(sessionId);
 
     // Check if payment is completed
@@ -26,6 +27,49 @@ export async function GET(request: Request) {
     const contractId = session.metadata?.contract_id || session.metadata?.contractId;
     if (contractId) {
       contract = await db.contracts.findById(contractId);
+    }
+
+    // Get payment method info if available
+    let paymentMethodInfo = null;
+    let customerId = null;
+    let hasRemainingBalance = false;
+    
+    if (isPaid && session.payment_intent) {
+      try {
+        const paymentIntentId = typeof session.payment_intent === 'string' 
+          ? session.payment_intent 
+          : (session.payment_intent as any).id;
+        
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+          expand: ['payment_method'],
+        });
+        
+        customerId = typeof session.customer === 'string' 
+          ? session.customer 
+          : (session.customer as any)?.id || session.metadata?.customerId;
+        
+        if (paymentIntent.payment_method && typeof paymentIntent.payment_method === 'object') {
+          const pm = paymentIntent.payment_method as any;
+          paymentMethodInfo = {
+            id: pm.id,
+            type: pm.type,
+            card: pm.card ? {
+              brand: pm.card.brand,
+              last4: pm.card.last4,
+              exp_month: pm.card.exp_month,
+              exp_year: pm.card.exp_year,
+            } : null,
+          };
+        }
+        
+        // Check if there's a remaining balance
+        if (contract) {
+          const remainingBalance = contract.totalAmount - contract.depositAmount;
+          hasRemainingBalance = remainingBalance > 0.01;
+        }
+      } catch (error) {
+        console.error("Error retrieving payment method info:", error);
+      }
     }
 
     return NextResponse.json({
@@ -44,8 +88,14 @@ export async function GET(request: Request) {
             id: contract.id,
             status: contract.status,
             title: contract.title,
+            depositAmount: contract.depositAmount,
+            totalAmount: contract.totalAmount,
+            remainingBalance: contract.totalAmount - contract.depositAmount,
           }
         : null,
+      paymentMethod: paymentMethodInfo,
+      customerId: customerId,
+      hasRemainingBalance: hasRemainingBalance,
       message: isPaid
         ? "Payment verified successfully"
         : `Payment status: ${session.payment_status}`,

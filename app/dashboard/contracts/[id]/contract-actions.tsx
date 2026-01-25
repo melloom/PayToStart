@@ -1,22 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
-import { Mail, Send, Download, MessageSquare, Lock } from "lucide-react";
+import { Mail, Send, Download, MessageSquare, Lock, Pen } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SignatureCanvas } from "@/components/signature/signature-canvas";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function ContractActions({
   contractId,
   clientEmail,
   signingUrl,
+  contractStatus,
+  hasClientSignature,
+  hasContractorSignature,
+  depositAmount,
+  totalAmount,
 }: {
   contractId: string;
   clientEmail: string;
   signingUrl: string;
+  contractStatus?: string;
+  hasClientSignature?: boolean;
+  hasContractorSignature?: boolean;
+  depositAmount?: number;
+  totalAmount?: number;
 }) {
   const { toast } = useToast();
   const [isResending, setIsResending] = useState(false);
@@ -25,10 +37,19 @@ export default function ContractActions({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [showSMSDialog, setShowSMSDialog] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [showSignDialog, setShowSignDialog] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [usePassword, setUsePassword] = useState(false);
   const [emailToSend, setEmailToSend] = useState(clientEmail);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [fullName, setFullName] = useState("");
+  const [isSigning, setIsSigning] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<string>("");
+  const [customPaymentMethod, setCustomPaymentMethod] = useState<string>("");
+  
+  // Check if contract has payment amounts
+  const hasPayment = (depositAmount && depositAmount > 0) || (totalAmount && totalAmount > 0);
 
   const handleResend = async () => {
     // Validate email
@@ -50,6 +71,26 @@ export default function ContractActions({
         variant: "destructive",
       });
       return;
+    }
+
+    // Validate payment method if contract has payment amounts
+    if (hasPayment) {
+      if (!paymentMethod) {
+        toast({
+          title: "Payment Method Required",
+          description: "Please select how the client will pay. If accepting cash or offline payment, select 'Cash/Offline Payment'.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (paymentMethod === "other" && !customPaymentMethod.trim()) {
+        toast({
+          title: "Error",
+          description: "Please specify the custom payment method",
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     // Validate password if using one
@@ -82,12 +123,18 @@ export default function ContractActions({
 
     setIsResending(true);
     try {
+      // Determine final payment method value
+      const finalPaymentMethod = paymentMethod === "other" 
+        ? customPaymentMethod.trim() 
+        : paymentMethod;
+
       const response = await fetch(`/api/contracts/${contractId}/resend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           email: emailToSend.trim(),
           password: usePassword ? password : null,
+          paymentMethod: hasPayment ? finalPaymentMethod : null,
         }),
       });
 
@@ -103,6 +150,8 @@ export default function ContractActions({
         setConfirmPassword("");
         setUsePassword(false);
         setEmailToSend(clientEmail);
+        setPaymentMethod("");
+        setCustomPaymentMethod("");
       } else {
         const error = await response.json();
         toast({
@@ -210,19 +259,26 @@ export default function ContractActions({
     }
   };
 
+  // Hide send/resend email and SMS buttons after both parties have signed
+  // Show them only for draft, ready, and sent statuses (before both sign)
+  const bothSigned = hasClientSignature && hasContractorSignature;
+  const showSendButtons = !bothSigned && contractStatus && 
+    (contractStatus === "draft" || contractStatus === "ready" || contractStatus === "sent");
+
   return (
     <div className="space-y-2 w-full min-w-0">
-      <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
-        <DialogTrigger asChild>
-          <Button
-            disabled={isResending}
-            variant="outline"
-            className="w-full"
-          >
-            <Send className="h-4 w-4 mr-2" />
-            Send / Resend Email
-          </Button>
-        </DialogTrigger>
+      {showSendButtons && (
+        <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+          <DialogTrigger asChild>
+            <Button
+              disabled={isResending}
+              variant="outline"
+              className="w-full"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Send / Resend Email
+            </Button>
+          </DialogTrigger>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Contract</DialogTitle>
@@ -248,6 +304,43 @@ export default function ContractActions({
                 The email address where the contract will be sent
               </p>
             </div>
+
+            {/* Payment Method Selection - Required if contract has payment amounts */}
+            {hasPayment && (
+              <div className="space-y-2">
+                <Label htmlFor="paymentMethod">
+                  Payment Method <span className="text-red-500">*</span>
+                </Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger id="paymentMethod">
+                    <SelectValue placeholder="Select how client will pay" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stripe">Credit/Debit Card (Stripe)</SelectItem>
+                    <SelectItem value="cash">Cash/Offline Payment</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer (ACH/Wire)</SelectItem>
+                    <SelectItem value="check">Check</SelectItem>
+                    <SelectItem value="paypal">PayPal</SelectItem>
+                    <SelectItem value="venmo">Venmo</SelectItem>
+                    <SelectItem value="zelle">Zelle</SelectItem>
+                    <SelectItem value="other">Other (specify below)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {paymentMethod === "other" && (
+                  <Input
+                    placeholder="Specify payment method (e.g., Cash App, Apple Pay)"
+                    value={customPaymentMethod}
+                    onChange={(e) => setCustomPaymentMethod(e.target.value)}
+                    className="mt-2"
+                  />
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {paymentMethod === "cash" 
+                    ? "Client will pay offline. No online payment processing will be set up."
+                    : "This will be saved to the contract and shown to the client."}
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center space-x-2">
               <Checkbox
@@ -297,13 +390,15 @@ export default function ContractActions({
                   setConfirmPassword("");
                   setUsePassword(false);
                   setEmailToSend(clientEmail);
+                  setPaymentMethod("");
+                  setCustomPaymentMethod("");
                 }}
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleResend}
-                disabled={isResending || !emailToSend.trim()}
+                disabled={isResending || !emailToSend.trim() || (hasPayment && !paymentMethod)}
               >
                 {isResending ? "Sending..." : "Send Email"}
               </Button>
@@ -311,17 +406,19 @@ export default function ContractActions({
           </div>
         </DialogContent>
       </Dialog>
+      )}
       
-      <Dialog open={showSMSDialog} onOpenChange={setShowSMSDialog}>
-        <DialogTrigger asChild>
-          <Button
-            variant="outline"
-            className="w-full"
-          >
-            <MessageSquare className="h-4 w-4 mr-2" />
-            Send via Text
-          </Button>
-        </DialogTrigger>
+      {showSendButtons && (
+        <Dialog open={showSMSDialog} onOpenChange={setShowSMSDialog}>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full"
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Send via Text
+            </Button>
+          </DialogTrigger>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Contract via Text Message</DialogTitle>
@@ -360,6 +457,7 @@ export default function ContractActions({
           </div>
         </DialogContent>
       </Dialog>
+      )}
 
       <Button
         onClick={handleDownloadPDF}
@@ -369,6 +467,123 @@ export default function ContractActions({
         <Download className="h-4 w-4 mr-2" />
         {isGeneratingPDF ? "Generating PDF..." : "Download PDF"}
       </Button>
+
+      {/* Sign Contract Button - Show for all statuses (contractor can sign before or after client) */}
+      {contractStatus && contractStatus !== "cancelled" && (
+        <Dialog open={showSignDialog} onOpenChange={setShowSignDialog}>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="w-full border-green-500 text-green-700 hover:bg-green-50"
+              disabled={false}
+            >
+              <Pen className="h-4 w-4 mr-2" />
+              {hasContractorSignature ? "Update Signature" : "Sign Contract"}
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{hasContractorSignature ? "Update Your Signature" : "Sign Contract"}</DialogTitle>
+              <DialogDescription>
+                {hasContractorSignature 
+                  ? "You can update your signature. Note: Once the contract is sent, the contract content cannot be changed for legal reasons."
+                  : "Add your signature to the contract. You can sign before or after sending it to the client."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full Name</Label>
+                <Input
+                  id="fullName"
+                  type="text"
+                  placeholder="Enter your full name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Signature (Optional)</Label>
+                <div className="border-2 border-gray-300 rounded-lg p-4 bg-white">
+                  <SignatureCanvas
+                    onSignatureChange={setSignatureDataUrl}
+                    value={signatureDataUrl}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Draw your signature above, or leave blank to sign with name only
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowSignDialog(false);
+                    setFullName("");
+                    setSignatureDataUrl(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!fullName.trim()) {
+                      toast({
+                        title: "Error",
+                        description: "Please enter your full name",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+
+                    setIsSigning(true);
+                    try {
+                      const response = await fetch(`/api/contracts/${contractId}/contractor-sign`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          fullName: fullName.trim(),
+                          signatureDataUrl: signatureDataUrl,
+                        }),
+                      });
+
+                      if (response.ok) {
+                        toast({
+                          title: "Contract signed!",
+                          description: "Your signature has been added to the contract.",
+                        });
+                        setShowSignDialog(false);
+                        setFullName("");
+                        setSignatureDataUrl(null);
+                        // Refresh the page to show updated signature
+                        window.location.reload();
+                      } else {
+                        const error = await response.json();
+                        toast({
+                          title: "Error",
+                          description: error.message || "Failed to sign contract",
+                          variant: "destructive",
+                        });
+                      }
+                    } catch (error) {
+                      toast({
+                        title: "Error",
+                        description: "Something went wrong. Please try again.",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsSigning(false);
+                    }
+                  }}
+                  disabled={isSigning || !fullName.trim()}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isSigning ? "Signing..." : "Sign Contract"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

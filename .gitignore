@@ -102,9 +102,7 @@ Desktop.ini
 # Package manager files
 package-lock.json.bak
 yarn.lock.bak
-pnpm-lock.yaml.bak
-
-# Supabase
+pnpm-lock.yaml.bak# Supabase
 .supabase/
 
 # Database

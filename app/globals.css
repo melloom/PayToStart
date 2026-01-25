@@ -2,6 +2,462 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Contract Content Display - Clean and Professional - AGGRESSIVE OVERRIDES */
+.contract-content-display {
+  font-family: Georgia, serif !important;
+  color: rgb(31 41 55) !important; /* gray-800 - high contrast for readability */
+  font-size: 0.9375rem !important; /* 15px */
+  line-height: 1.8 !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+}
+
+.dark .contract-content-display {
+  color: rgb(229 231 235) !important; /* gray-200 - visible in dark mode */
+}
+
+/* AGGRESSIVE: Force all child elements to use our styles */
+.contract-content-display *,
+.contract-content-display *::before,
+.contract-content-display *::after {
+  color: rgb(31 41 55) !important;
+  font-family: Georgia, serif !important;
+  max-width: 100% !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+  box-sizing: border-box !important;
+}
+
+.dark .contract-content-display *,
+.dark .contract-content-display *::before,
+.dark .contract-content-display *::after {
+  color: rgb(229 231 235) !important;
+}
+
+/* AGGRESSIVE: Override ALL inline styles */
+.contract-content-display [style],
+.contract-content-display [style*="color"],
+.contract-content-display [style*="font"],
+.contract-content-display [style*="background"] {
+  color: rgb(31 41 55) !important;
+  font-family: Georgia, serif !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.dark .contract-content-display [style],
+.dark .contract-content-display [style*="color"],
+.dark .contract-content-display [style*="font"],
+.dark .contract-content-display [style*="background"] {
+  color: rgb(229 231 235) !important;
+}
+
+/* Headings */
+.contract-content-display h1,
+.contract-content-display h2,
+.contract-content-display h3,
+.contract-content-display h4,
+.contract-content-display h5,
+.contract-content-display h6 {
+  font-weight: 700 !important;
+  margin-top: 1.5em !important;
+  margin-bottom: 0.75em !important;
+  color: rgb(31 41 55) !important;
+  line-height: 1.3 !important;
+}
+
+.dark .contract-content-display h1,
+.dark .contract-content-display h2,
+.dark .contract-content-display h3,
+.dark .contract-content-display h4,
+.dark .contract-content-display h5,
+.dark .contract-content-display h6 {
+  color: rgb(229 231 235) !important;
+}
+
+.contract-content-display h1 { font-size: 1.75em !important; }
+.contract-content-display h2 { font-size: 1.5em !important; }
+.contract-content-display h3 { font-size: 1.25em !important; }
+.contract-content-display h4 { font-size: 1.125em !important; }
+.contract-content-display h5,
+.contract-content-display h6 { font-size: 1em !important; }
+
+/* Paragraphs */
+.contract-content-display p {
+  margin-top: 0.75em !important;
+  margin-bottom: 0.75em !important;
+  line-height: 1.8 !important;
+  color: rgb(31 41 55) !important;
+}
+
+.dark .contract-content-display p {
+  color: rgb(229 231 235) !important;
+}
+
+/* Empty paragraphs */
+.contract-content-display p:empty {
+  margin: 0.5em 0 !important;
+  min-height: 0.5em !important;
+}
+
+/* Lists */
+.contract-content-display ul,
+.contract-content-display ol {
+  margin-top: 0.75em !important;
+  margin-bottom: 0.75em !important;
+  padding-left: 2em !important;
+}
+
+.contract-content-display li {
+  margin-top: 0.5em !important;
+  margin-bottom: 0.5em !important;
+  line-height: 1.8 !important;
+}
+
+/* Links */
+.contract-content-display a {
+  color: rgb(37 99 235) !important; /* blue-600 */
+  text-decoration: underline !important;
+}
+
+.dark .contract-content-display a {
+  color: rgb(96 165 250) !important; /* blue-400 */
+}
+
+/* Strong and emphasis */
+.contract-content-display strong,
+.contract-content-display b {
+  font-weight: 700 !important;
+  color: inherit !important;
+}
+
+.contract-content-display em,
+.contract-content-display i {
+  font-style: italic !important;
+  color: inherit !important;
+}
+
+/* Code */
+.contract-content-display code {
+  background-color: rgb(243 244 246) !important;
+  padding: 0.125rem 0.375rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.875em !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+.dark .contract-content-display code {
+  background-color: rgb(55 65 81) !important;
+}
+
+/* Blockquotes */
+.contract-content-display blockquote {
+  border-left: 4px solid rgb(209 213 219) !important;
+  padding-left: 1em !important;
+  margin: 1em 0 !important;
+  font-style: italic !important;
+}
+
+.dark .contract-content-display blockquote {
+  border-left-color: rgb(75 85 99) !important;
+}
+
+/* Tables */
+.contract-content-display table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin: 1em 0 !important;
+}
+
+.contract-content-display th,
+.contract-content-display td {
+  border: 1px solid rgb(209 213 219) !important;
+  padding: 0.5em !important;
+  text-align: left !important;
+}
+
+.dark .contract-content-display th,
+.dark .contract-content-display td {
+  border-color: rgb(75 85 99) !important;
+}
+
+.contract-content-display th {
+  background-color: rgb(243 244 246) !important;
+  font-weight: 700 !important;
+}
+
+.dark .contract-content-display th {
+  background-color: rgb(55 65 81) !important;
+}
+
+/* Remove any inline styles that might interfere */
+.contract-content-display [style] {
+  color: inherit !important;
+  font-family: Georgia, serif !important;
+}
+
+/* Ensure divs and spans don't break layout */
+.contract-content-display div,
+.contract-content-display span {
+  display: block !important;
+  color: inherit !important;
+}
+
+.contract-content-display span {
+  display: inline !important;
+}
+
+/* Ensure proper spacing for sections */
+.contract-content-display > *:first-child {
+  margin-top: 0 !important;
+}
+
+.contract-content-display > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Better list styling */
+.contract-content-display ul {
+  list-style-type: disc !important;
+}
+
+.contract-content-display ol {
+  list-style-type: decimal !important;
+}
+
+.contract-content-display ul ul {
+  list-style-type: circle !important;
+}
+
+.contract-content-display ol ol {
+  list-style-type: lower-alpha !important;
+}
+
+/* Reset all child elements to match preview styling - but allow proper HTML structure */
+.contract-content-wrapper * {
+  font-family: Georgia, serif !important;
+  color: rgb(55 65 81) !important;
+  line-height: 1.75 !important;
+  font-size: 0.875rem !important;
+}
+
+.dark .contract-content-wrapper * {
+  color: rgb(209 213 219) !important;
+}
+
+/* Override any inline styles */
+.contract-content-wrapper [style] {
+  font-family: Georgia, serif !important;
+  color: rgb(55 65 81) !important;
+  line-height: 1.75 !important;
+  font-size: 0.875rem !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+}
+
+.dark .contract-content-wrapper [style] {
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper h1,
+.contract-content-wrapper h2,
+.contract-content-wrapper h3,
+.contract-content-wrapper h4,
+.contract-content-wrapper h5,
+.contract-content-wrapper h6 {
+  font-weight: 700 !important;
+  margin-top: 1em !important;
+  margin-bottom: 0.5em !important;
+  color: rgb(55 65 81) !important;
+  line-height: 1.2 !important;
+}
+
+.dark .contract-content-wrapper h1,
+.dark .contract-content-wrapper h2,
+.dark .contract-content-wrapper h3,
+.dark .contract-content-wrapper h4,
+.dark .contract-content-wrapper h5,
+.dark .contract-content-wrapper h6 {
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper h1 {
+  font-size: 1.5em !important;
+}
+
+.contract-content-wrapper h2 {
+  font-size: 1.25em !important;
+}
+
+.contract-content-wrapper h3 {
+  font-size: 1.125em !important;
+}
+
+.contract-content-wrapper h4,
+.contract-content-wrapper h5,
+.contract-content-wrapper h6 {
+  font-size: 1em !important;
+}
+
+.contract-content-wrapper p {
+  margin-top: 0.5em !important;
+  margin-bottom: 0.5em !important;
+  line-height: 1.75 !important;
+  color: rgb(55 65 81) !important;
+}
+
+.dark .contract-content-wrapper p {
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper ul,
+.contract-content-wrapper ol {
+  margin-top: 0.5em !important;
+  margin-bottom: 0.5em !important;
+  padding-left: 1.5em !important;
+}
+
+.contract-content-wrapper li {
+  margin-top: 0.25em !important;
+  margin-bottom: 0.25em !important;
+  line-height: 1.75 !important;
+}
+
+.contract-content-wrapper ul {
+  list-style-type: disc !important;
+}
+
+.contract-content-wrapper ol {
+  list-style-type: decimal !important;
+}
+
+.contract-content-wrapper strong,
+.contract-content-wrapper b {
+  font-weight: 700 !important;
+  color: rgb(55 65 81) !important;
+}
+
+.dark .contract-content-wrapper strong,
+.dark .contract-content-wrapper b {
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper em,
+.contract-content-wrapper i {
+  font-style: italic !important;
+}
+
+.contract-content-wrapper a {
+  color: rgb(37 99 235) !important;
+  text-decoration: underline !important;
+}
+
+.contract-content-wrapper a:hover {
+  color: rgb(29 78 216) !important;
+}
+
+.dark .contract-content-wrapper a {
+  color: rgb(96 165 250) !important;
+}
+
+.dark .contract-content-wrapper a:hover {
+  color: rgb(147 197 253) !important;
+}
+
+.contract-content-wrapper blockquote {
+  border-left: 4px solid rgb(209 213 219) !important;
+  padding-left: 1em !important;
+  margin: 1em 0 !important;
+  font-style: italic !important;
+  color: rgb(107 114 128) !important;
+}
+
+.dark .contract-content-wrapper blockquote {
+  border-left-color: rgb(75 85 99) !important;
+  color: rgb(156 163 175) !important;
+}
+
+.contract-content-wrapper code {
+  background-color: rgb(243 244 246) !important;
+  padding: 0.125em 0.375em !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.875em !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+.dark .contract-content-wrapper code {
+  background-color: rgb(31 41 55) !important;
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper pre {
+  background-color: rgb(243 244 246) !important;
+  padding: 1em !important;
+  border-radius: 0.5rem !important;
+  overflow-x: auto !important;
+  margin: 1em 0 !important;
+  font-size: 0.875em !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+.dark .contract-content-wrapper pre {
+  background-color: rgb(31 41 55) !important;
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper table {
+  width: 100% !important;
+  margin: 1em 0 !important;
+  border-collapse: collapse !important;
+  border: 1px solid rgb(209 213 219) !important;
+}
+
+.dark .contract-content-wrapper table {
+  border-color: rgb(75 85 99) !important;
+}
+
+.contract-content-wrapper th,
+.contract-content-wrapper td {
+  border: 1px solid rgb(209 213 219) !important;
+  padding: 0.5em 0.75em !important;
+  text-align: left !important;
+}
+
+.dark .contract-content-wrapper th,
+.dark .contract-content-wrapper td {
+  border-color: rgb(75 85 99) !important;
+}
+
+.contract-content-wrapper th {
+  background-color: rgb(249 250 251) !important;
+  font-weight: 700 !important;
+  color: rgb(55 65 81) !important;
+}
+
+.dark .contract-content-wrapper th {
+  background-color: rgb(31 41 55) !important;
+  color: rgb(209 213 219) !important;
+}
+
+.contract-content-wrapper hr {
+  margin: 1em 0 !important;
+  border: none !important;
+  border-top: 1px solid rgb(209 213 219) !important;
+}
+
+.dark .contract-content-wrapper hr {
+  border-top-color: rgb(75 85 99) !important;
+}
+
+/* Remove any inline styles that might interfere */
+.contract-content-wrapper [style] {
+  font-family: Georgia, serif !important;
+  color: inherit !important;
+}
+
 @keyframes loading {
   0% {
     width: 0%;

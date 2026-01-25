@@ -22,6 +22,33 @@ export async function createDepositCheckoutSession(
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+  // Get or create Stripe customer for saving payment methods
+  let customerId: string | null = null;
+  try {
+    // Try to find existing customer by email
+    const existingCustomers = await stripe.customers.list({
+      email: clientEmail,
+      limit: 1,
+    });
+    
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
+    } else {
+      // Create new customer
+      const customer = await stripe.customers.create({
+        email: clientEmail,
+        metadata: {
+          contractId: contract.id,
+          companyId: contract.companyId,
+        },
+      });
+      customerId = customer.id;
+    }
+  } catch (error) {
+    console.error("Error creating/finding customer:", error);
+    // Continue without customer - payment method won't be saved
+  }
+
   // Create Stripe Checkout Session
   // Note: Apple Pay and Google Pay are automatically available in Checkout
   // when the customer's device/browser supports them and the merchant is eligible
@@ -43,7 +70,8 @@ export async function createDepositCheckoutSession(
     mode: "payment",
     success_url: `${baseUrl}/sign/${signingToken}/complete?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/sign/${signingToken}?canceled=1`,
-    customer_email: clientEmail,
+    customer: customerId || undefined, // Use customer if available, otherwise use email
+    customer_email: customerId ? undefined : clientEmail, // Only set email if no customer
     metadata: {
       contractId: contract.id,
       contract_id: contract.id, // Support both formats for backward compatibility
@@ -51,8 +79,10 @@ export async function createDepositCheckoutSession(
       companyId: contract.companyId,
       company_id: contract.companyId, // Support both formats
       type: "deposit",
+      customerId: customerId || "", // Store customer ID for later use
     },
     payment_intent_data: {
+      setup_future_usage: "off_session", // Allow saving payment method for future use
       metadata: {
         contractId: contract.id,
         contract_id: contract.id,
@@ -60,6 +90,7 @@ export async function createDepositCheckoutSession(
         companyId: contract.companyId,
         company_id: contract.companyId,
         type: "deposit",
+        customerId: customerId || "",
       },
     },
     // Allow promotion codes
@@ -208,7 +239,7 @@ export async function processCompletedCheckoutSession(
  */
 export async function retrieveCheckoutSession(sessionId: string) {
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
-    expand: ["payment_intent", "customer"],
+    expand: ["payment_intent", "payment_intent.payment_method", "customer"],
   });
 
   return session;

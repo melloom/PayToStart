@@ -3,6 +3,9 @@
 import type { SubscriptionTier } from "@/lib/types";
 import { TIER_CONFIG } from "@/lib/types";
 
+// Contact email for support inquiries
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || "contact@mellowsites.com";
+
 export interface SubscriptionEmailData {
   contractorName: string;
   contractorEmail: string;
@@ -71,7 +74,7 @@ export function getInvoicePaymentFailedEmail(data: SubscriptionEmailData): { sub
           </div>
           ${data.billingPortalUrl ? `<div style="text-align: center; margin: 40px 0;"><a href="${data.billingPortalUrl}" style="display: inline-block; background: #dc2626; color: white; padding: 16px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">Update Payment Method</a></div>` : ""}
           <div style="background: #fef3c7; border-radius: 6px; padding: 15px; margin: 20px 0;"><p style="margin: 0; font-size: 14px; color: #92400e;"><strong>Important:</strong> Your subscription may be paused or cancelled if payment is not updated. Please update your payment method as soon as possible.</p></div>
-          <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;"><p style="font-size: 14px; color: #6b7280; margin: 0;">If you have any questions, please contact our support team.</p></div>
+          <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;"><p style="font-size: 14px; color: #6b7280; margin: 0;">If you have any questions, please contact us at ${CONTACT_EMAIL}.</p></div>
         </div>
       </body>
     </html>
@@ -121,7 +124,7 @@ export function getInvoiceUpcomingEmail(data: SubscriptionEmailData): { subject:
             ${data.nextBillingDate ? `<p style="margin: 10px 0 0 0; font-size: 14px; color: #1e3a8a;">Billing date: ${data.nextBillingDate.toLocaleDateString()}</p>` : ""}
           </div>
           ${data.billingPortalUrl ? `<div style="text-align: center; margin: 40px 0;"><a href="${data.billingPortalUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 16px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">Manage Subscription</a></div>` : ""}
-          <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;"><p style="font-size: 14px; color: #6b7280; margin: 0;">If you have any questions about your subscription, please contact our support team.</p></div>
+          <div style="border-top: 1px solid #e5e7eb; margin-top: 40px; padding-top: 20px;"><p style="font-size: 14px; color: #6b7280; margin: 0;">If you have any questions about your subscription, please contact us at ${CONTACT_EMAIL}.</p></div>
         </div>
       </body>
     </html>
@@ -332,7 +335,7 @@ export function getSubscriptionCreatedEmail(data: SubscriptionCreatedEmailData):
                     <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 20px; margin: 30px 0;">
                       <p style="margin: 0; color: #0c4a6e; font-size: 14px; line-height: 1.6;">
                         <strong style="color: #0369a1;">💡 Need Help?</strong><br>
-                        Our support team is here to help you get the most out of your subscription. If you have any questions, just reply to this email or visit our help center.
+                        Our support team is here to help you get the most out of your subscription. If you have any questions, please contact us at ${CONTACT_EMAIL}.
                       </p>
                     </div>
 
@@ -442,7 +445,7 @@ export function getSubscriptionEndingEmail(data: SubscriptionEmailData & { subsc
                     <div style="background: #f0f9ff; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 20px; margin: 30px 0;">
                       <p style="margin: 0; color: #0c4a6e; font-size: 14px; line-height: 1.6;">
                         <strong style="color: #0369a1;">💡 Questions?</strong><br>
-                        If you have any questions about your subscription or need assistance, please contact our support team. We're here to help!
+                        If you have any questions about your subscription or need assistance, please contact us at ${CONTACT_EMAIL}. We're here to help!
                       </p>
                     </div>
 

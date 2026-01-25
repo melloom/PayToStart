@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, FileText, Mail, Download, Loader2 } from "lucide-react";
+import { CheckCircle, FileText, Mail, Download, Loader2, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import Link from "next/link";
 
 export default function SignCompletePage() {
@@ -12,7 +13,14 @@ export default function SignCompletePage() {
   const searchParams = useSearchParams();
   const [isVerifying, setIsVerifying] = useState(true);
   const [paymentStatus, setPaymentStatus] = useState<"pending" | "paid" | "error">("pending");
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showSaveCardDialog, setShowSaveCardDialog] = useState(false);
+  const [isSavingCard, setIsSavingCard] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<any>(null);
+  const [contract, setContract] = useState<any>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const sessionId = searchParams.get("session_id");
+  const token = params.token as string;
 
   useEffect(() => {
     // Verify payment status if session ID is provided
@@ -29,12 +37,80 @@ export default function SignCompletePage() {
       if (response.ok) {
         const data = await response.json();
         setPaymentStatus(data.paid ? "paid" : "pending");
+        setContract(data.contract);
+        setPaymentMethod(data.paymentMethod);
+        setCustomerId(data.customerId);
+        
+        // Show save card dialog if payment was successful, has payment method, and has remaining balance
+        if (data.paid && data.paymentMethod && data.hasRemainingBalance && data.customerId) {
+          setShowSaveCardDialog(true);
+        }
       }
     } catch (error) {
       console.error("Error verifying payment:", error);
       setPaymentStatus("error");
     } finally {
       setIsVerifying(false);
+    }
+  };
+
+  const handleSaveCard = async () => {
+    if (!paymentMethod || !customerId || !contract) return;
+    
+    setIsSavingCard(true);
+    try {
+      const response = await fetch("/api/stripe/save-payment-method", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentMethodId: paymentMethod.id,
+          customerId: customerId,
+          contractId: contract.id,
+          remainingBalance: contract.remainingBalance,
+        }),
+      });
+
+      if (response.ok) {
+        setShowSaveCardDialog(false);
+        // Show success message
+        alert("Card saved successfully! The remaining balance will be automatically charged when due.");
+      } else {
+        const error = await response.json();
+        alert(error.message || "Failed to save card. You can still pay manually later.");
+      }
+    } catch (error) {
+      console.error("Error saving card:", error);
+      alert("Failed to save card. You can still pay manually later.");
+    } finally {
+      setIsSavingCard(false);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!token) return;
+    
+    setIsDownloading(true);
+    try {
+      const response = await fetch(`/api/contracts/download-pdf/${token}`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `contract-${token.slice(0, 8)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        const error = await response.json();
+        alert(error.message || "Failed to download PDF");
+      }
+    } catch (error) {
+      console.error("Error downloading PDF:", error);
+      alert("Failed to download PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -52,8 +128,88 @@ export default function SignCompletePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 py-12 px-4">
-      <div className="max-w-2xl mx-auto">
+    <>
+      {/* Save Card Dialog */}
+      <Dialog open={showSaveCardDialog} onOpenChange={setShowSaveCardDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Save Card for Remaining Balance?
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              {paymentMethod && contract && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-slate-900 mb-2">
+                      Card: •••• {paymentMethod.card?.last4} ({paymentMethod.card?.brand})
+                    </p>
+                    <p className="text-sm text-slate-700">
+                      Remaining balance: <strong className="text-lg">${contract.remainingBalance?.toFixed(2)}</strong>
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-700">
+                      Would you like to save this card to automatically pay the remaining balance when it's due?
+                    </p>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <p className="text-sm font-semibold text-blue-900 mb-2">
+                        If you save it:
+                      </p>
+                      <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                        <li>We'll automatically charge <strong>${contract.remainingBalance?.toFixed(2)}</strong> when the balance is due</li>
+                        <li>No need to enter card details again</li>
+                        <li>You'll receive email notifications before charging</li>
+                      </ul>
+                    </div>
+                    
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm font-semibold text-amber-900 mb-2">
+                        If you don't save it:
+                      </p>
+                      <p className="text-sm text-amber-800">
+                        Your card will only be used for this {contract.depositAmount > 0 ? 'deposit' : 'payment'}. You'll need to enter payment details again when the remaining balance is due.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveCardDialog(false)}
+              disabled={isSavingCard}
+              className="w-full sm:w-auto"
+            >
+              No, Just Use for This Payment
+            </Button>
+            <Button
+              onClick={handleSaveCard}
+              disabled={isSavingCard}
+              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+            >
+              {isSavingCard ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Yes, Save for Remaining Balance
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 py-12 px-4">
+        <div className="max-w-2xl mx-auto">
         {/* Success Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
@@ -129,12 +285,29 @@ export default function SignCompletePage() {
 
             <div className="flex items-start gap-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <FileText className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold text-blue-900 mb-1">Contract PDF</p>
-                <p className="text-sm text-blue-800">
-                  A signed PDF version of your contract is available in the email. 
+                <p className="text-sm text-blue-800 mb-3">
+                  A signed PDF version of your contract is available. 
                   Download and save it for your records.
                 </p>
+                <Button
+                  onClick={handleDownloadPDF}
+                  disabled={isDownloading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      Download PDF
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
 
@@ -182,5 +355,6 @@ export default function SignCompletePage() {
         </Card>
       </div>
     </div>
+    </>
   );
 }

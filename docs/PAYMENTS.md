@@ -7,35 +7,65 @@ The payment system uses **Stripe Checkout Sessions** for fast, secure deposit co
 ### Flow
 
 ```
-1. Client signs contract → Status: "signed"
+1. Client views contract at /sign/[token]
    ↓
-2. Redirect to /pay/[token]
+2. Client sees prominent payment notice (if deposit required)
+   - Shows deposit amount
+   - Explains payment will be required after signing
+   - Lists next steps
    ↓
-3. Client clicks "Pay Deposit"
+3. Client signs contract → Status: "signed"
    ↓
-4. Create Stripe Checkout Session via /api/stripe/create-checkout
+4. System automatically creates Stripe Checkout Session
+   - Via /api/stripe/create-checkout (called from signing API)
+   - Creates payment record in database
+   - Sends "signed but unpaid" email to client
    ↓
-5. Redirect to Stripe Checkout
+5. Client automatically redirected to Stripe Checkout
+   - Or fallback to /pay/[token] if checkout URL not available
    ↓
-6. Client completes payment
+6. Client completes payment in Stripe Checkout
    ↓
 7. Stripe sends webhook: checkout.session.completed
    ↓
 8. Webhook verifies payment & signature
+   - Checks idempotency (prevents duplicate processing)
+   - Verifies payment status is "paid"
+   - Verifies contract is signed
+   - Verifies payment amount matches deposit
    ↓
-9. Update contract to "paid" status
+9. Update payment record to "completed"
    ↓
-10. Finalize contract (PDF + Email)
+10. Update contract to "paid" status
+   ↓
+11. Finalize contract (PDF + Email)
+    - Generate final contract PDF with signatures
+    - Store PDF in storage
+    - Email both parties with PDF attachment
+    - Include payment receipt information
 ```
 
 ## Implementation
+
+### Payment Notice Before Signing
+
+**Location**: `/sign/[token]` page
+
+Before clients sign a contract, they are shown a prominent payment notice if a deposit is required:
+
+- **Warning Box**: Displays deposit amount, total contract amount, and balance information
+- **Step-by-Step Guide**: Explains what happens after signing (sign → redirect to payment → complete payment → contract finalized)
+- **Agreement Acknowledgment**: The signature agreement checkbox includes acknowledgment of the payment requirement
+- **Welcome Dialog**: Payment information is also shown in the initial welcome dialog
+
+This ensures clients are fully informed about payment requirements before committing to sign the contract.
 
 ### Checkout Session Creation
 
 **Route**: `/api/stripe/create-checkout`  
 **Method**: POST
 
-Creates a Stripe Checkout Session for the contract deposit.
+Creates a Stripe Checkout Session for the contract deposit. This is automatically called when a contract with a deposit is signed, or can be called manually from the payment page.
 
 **Request Body**:
 ```json
@@ -57,10 +87,18 @@ Creates a Stripe Checkout Session for the contract deposit.
 
 **Features**:
 - Validates contract is signed
-- Creates payment record in database
-- Includes contract metadata
+- Creates payment record in database (status: "pending")
+- Includes contract metadata for verification
 - Sets success/cancel URLs
 - Collects customer email and billing address
+- Supports Apple Pay and Google Pay automatically
+- Allows promotion codes
+
+**Automatic Creation**: When a contract is signed via `/api/contracts/sign/[token]`, if a deposit is required, the system automatically:
+1. Creates a Stripe Checkout Session
+2. Returns the checkout URL in the response
+3. Client is automatically redirected to Stripe Checkout
+4. Sends "signed but unpaid" email to client with payment link
 
 ### Webhook Handler
 
@@ -70,14 +108,19 @@ Creates a Stripe Checkout Session for the contract deposit.
 Handles Stripe webhook events, specifically `checkout.session.completed`.
 
 **Process**:
-1. Verify webhook signature
-2. Check idempotency (skip if already processed)
+1. Verify webhook signature (ensures request is from Stripe)
+2. Check idempotency (skip if already processed - prevents duplicate finalization)
 3. Verify payment status is "paid"
-4. Verify contract is signed
-5. Verify payment amount matches deposit
-6. Update payment record
-7. Update contract status to "paid"
-8. Finalize contract (generate PDF, store, email)
+4. Verify contract is signed (must be "signed" status)
+5. Verify payment amount matches deposit (allows 0.01 difference for rounding)
+6. Update payment record status to "completed"
+7. Update contract status to "paid" and set `paidAt` timestamp
+8. Log audit events ("payment_completed" and "paid")
+9. Finalize contract:
+   - Generate final contract PDF with signatures
+   - Store PDF in storage bucket
+   - Email both parties with PDF attachment
+   - Include payment receipt information
 
 **Idempotency**: Webhooks can be retried. The system checks if payment is already processed to prevent duplicate processing.
 
@@ -219,13 +262,27 @@ Use Stripe test mode for development:
 ### Testing Flow
 
 1. **Create a contract** with deposit amount
-2. **Sign the contract** via `/sign/[token]`
-3. **Navigate to payment** page `/pay/[token]`
-4. **Click "Pay Deposit"** to create checkout session
-5. **Use test card** in Stripe Checkout
-6. **Complete payment** → Redirects to completion page
-7. **Webhook fires** → Contract finalized
-8. **Check emails** (or console logs in dev mode)
+2. **View contract** at `/sign/[token]`
+   - Verify payment notice is displayed prominently
+   - Check that deposit amount and total are shown
+   - Review payment information in welcome dialog
+3. **Sign the contract** via `/sign/[token]`
+   - System automatically creates Stripe Checkout Session
+   - Client is automatically redirected to Stripe Checkout
+   - "Signed but unpaid" email is sent to client
+4. **Use test card** in Stripe Checkout
+   - Test card: `4242 4242 4242 4242`
+   - Any future expiry date
+   - Any 3-digit CVC
+5. **Complete payment** → Redirects to completion page
+6. **Webhook fires** → Contract finalized
+   - Payment record updated to "completed"
+   - Contract status updated to "paid"
+   - Final PDF generated and stored
+   - Both parties receive email with PDF
+7. **Check emails** (or console logs in dev mode)
+   - Verify "signed but unpaid" email was sent
+   - Verify final contract email with PDF was sent
 
 ### Testing Webhooks Locally
 

@@ -31,6 +31,14 @@ export async function POST(
       return NextResponse.json({ message: "Client not found" }, { status: 404 });
     }
 
+    // Ensure signing token exists
+    if (!contract.signingToken || contract.signingToken.trim() === "") {
+      return NextResponse.json(
+        { message: "Contract is missing signing token. Please contact support." },
+        { status: 500 }
+      );
+    }
+
     const signingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/sign/${contract.signingToken}`;
 
     // Generate reminder email using template

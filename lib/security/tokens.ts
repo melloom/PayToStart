@@ -6,7 +6,7 @@ import { randomBytes, createHash, timingSafeEqual } from "crypto";
 const TOKEN_BYTES = 32; // 32 bytes = 256 bits
 const TOKEN_EXPIRY_DAYS = 7;
 const RATE_LIMIT_WINDOW_MINUTES = 15;
-const MAX_ATTEMPTS_PER_WINDOW = 5;
+const MAX_ATTEMPTS_PER_WINDOW = 20; // Increased from 5 to 20 for better UX
 
 // Get secret from environment (fallback for development)
 const TOKEN_SECRET = process.env.SIGNING_TOKEN_SECRET || "change-me-in-production-very-secure-secret-key";

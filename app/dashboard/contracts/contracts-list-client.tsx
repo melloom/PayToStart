@@ -37,7 +37,7 @@ interface ContractWithClient extends Contract {
   clientName: string;
 }
 
-type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
+type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "cancelled" | "drafts";
 
 export default function ContractsListClient({
   contracts,
@@ -259,7 +259,6 @@ export default function ContractsListClient({
 
   const filters: { value: FilterType; label: string; icon: React.ReactNode }[] = [
     { value: "all", label: "All", icon: <FileText className="h-4 w-4" /> },
-    { value: "draft", label: "Draft Contracts", icon: <FileText className="h-4 w-4" /> },
     { value: "ready", label: "Ready to Send", icon: <CheckCircle2 className="h-4 w-4" /> },
     { value: "drafts", label: "Draft Templates", icon: <Pen className="h-4 w-4" /> },
     { value: "sent", label: "Pending", icon: <Clock className="h-4 w-4" /> },

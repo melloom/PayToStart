@@ -228,28 +228,66 @@ export const db = {
     },
 
     async findBySigningToken(token: string): Promise<Contract | null> {
-      const supabase = await createClient();
-      // This method is deprecated - use findBySigningTokenHash instead
-      // Keeping for backwards compatibility during migration
+      // Use service role client for public signing routes to bypass RLS
+      // This is safe because we're only querying by signing token (which acts as authentication)
+      const { createServiceClient } = await import("./supabase/service");
+      const supabase = createServiceClient();
+      
+      console.log('[DB] findBySigningToken called with token:', token.substring(0, 16) + '...');
       const { data, error } = await supabase
         .from("contracts")
         .select("*")
         .eq("signing_token", token)
-        .single();
+        .maybeSingle(); // Use maybeSingle to avoid errors when not found
 
-      if (error || !data) return null;
+      console.log('[DB] Query result:', { 
+        hasData: !!data, 
+        hasError: !!error, 
+        error: error?.message,
+        contractId: data?.id 
+      });
+
+      if (error) {
+        console.warn("Error finding contract by token:", error);
+        return null;
+      }
+      if (!data) {
+        console.log('[DB] No contract found for token');
+        return null;
+      }
+      console.log('[DB] Contract found:', data.id);
       return mapContractFromDb(data);
     },
 
     async findBySigningTokenHash(tokenHash: string): Promise<Contract | null> {
-      const supabase = await createClient();
+      // Use service role client for public signing routes to bypass RLS
+      // This is safe because we're only querying by signing token hash (which acts as authentication)
+      const { createServiceClient } = await import("./supabase/service");
+      const supabase = createServiceClient();
+      
+      console.log('[DB] findBySigningTokenHash called with hash:', tokenHash.substring(0, 16) + '...');
       const { data, error } = await supabase
         .from("contracts")
         .select("*")
         .eq("signing_token_hash", tokenHash)
-        .single();
+        .maybeSingle(); // Use maybeSingle to avoid errors when not found
 
-      if (error || !data) return null;
+      console.log('[DB] Hash query result:', { 
+        hasData: !!data, 
+        hasError: !!error, 
+        error: error?.message,
+        contractId: data?.id 
+      });
+
+      if (error) {
+        console.warn("Error finding contract by token hash:", error);
+        return null;
+      }
+      if (!data) {
+        console.log('[DB] No contract found for token hash');
+        return null;
+      }
+      console.log('[DB] Contract found by hash:', data.id);
       return mapContractFromDb(data);
     },
 
@@ -296,24 +334,48 @@ export const db = {
       return mapContractFromDb(contract);
     },
 
-    async update(id: string, data: Partial<Contract>): Promise<Contract | null> {
-      const supabase = await createClient();
+    async update(id: string, data: Partial<Contract>, useServiceRole: boolean = false): Promise<Contract | null> {
+      // Use service role for updates during signing (public token flow)
+      const supabase = useServiceRole 
+        ? await (await import("./supabase/service")).createServiceClient()
+        : await createClient();
       
-      // Get current contract to check status
-      const currentContract = await this.findById(id);
+      // Get current contract to check status (use service role if needed)
+      let currentContract: Contract | null;
+      if (useServiceRole) {
+        // Use service role to get contract
+        const serviceSupabase = await (await import("./supabase/service")).createServiceClient();
+        const { data: contractData, error } = await serviceSupabase
+          .from("contracts")
+          .select("*")
+          .eq("id", id)
+          .single();
+        currentContract = contractData ? mapContractFromDb(contractData) : null;
+      } else {
+        currentContract = await this.findById(id);
+      }
       if (!currentContract) {
         throw new Error("Contract not found");
       }
 
-      // Prevent editing after signed (lock contract variables)
-      if (currentContract.status === "signed" || 
+      // Prevent editing contract content after it's been sent (legal requirement)
+      // Once sent, only status changes and signatures are allowed - no content/title/amount changes
+      if (currentContract.status === "sent" || 
+          currentContract.status === "signed" || 
           currentContract.status === "paid" || 
           currentContract.status === "completed") {
-        // Allow status changes, but lock content and field values
-        if (data.content !== undefined || data.fieldValues !== undefined || 
-            data.title !== undefined || data.depositAmount !== undefined || 
-            data.totalAmount !== undefined) {
-          throw new Error("Cannot edit contract content, fields, title, or amounts after signing");
+        // Contract has been sent or beyond - prevent content/title/amount edits
+        if (data.content !== undefined) {
+          throw new Error("Cannot edit contract content after it has been sent. This is a legal requirement to maintain contract integrity.");
+        }
+        if (data.title !== undefined) {
+          throw new Error("Cannot edit contract title after it has been sent. This is a legal requirement to maintain contract integrity.");
+        }
+        if (data.depositAmount !== undefined || data.totalAmount !== undefined) {
+          throw new Error("Cannot edit contract amounts after it has been sent. This is a legal requirement to maintain contract integrity.");
+        }
+        if (data.fieldValues !== undefined) {
+          throw new Error("Cannot edit contract fields after it has been sent. This is a legal requirement to maintain contract integrity.");
         }
       }
 
@@ -335,13 +397,19 @@ export const db = {
       if (data.fieldValues !== undefined) updateData.field_values = data.fieldValues;
       if (data.depositAmount !== undefined) updateData.deposit_amount = data.depositAmount;
       if (data.totalAmount !== undefined) updateData.total_amount = data.totalAmount;
-      if (data.signedAt !== undefined) updateData.signed_at = data.signedAt;
-      if (data.paidAt !== undefined) updateData.paid_at = data.paidAt;
-      if (data.completedAt !== undefined) updateData.completed_at = data.completedAt;
+      if (data.signedAt !== undefined) updateData.signed_at = data.signedAt instanceof Date ? data.signedAt.toISOString() : data.signedAt;
+      if (data.paidAt !== undefined) updateData.paid_at = data.paidAt instanceof Date ? data.paidAt.toISOString() : data.paidAt;
+      if (data.completedAt !== undefined) updateData.completed_at = data.completedAt instanceof Date ? data.completedAt.toISOString() : data.completedAt;
       if (data.pdfUrl !== undefined) updateData.pdf_url = data.pdfUrl;
-      if (data.signingTokenUsedAt !== undefined) updateData.signing_token_used_at = data.signingTokenUsedAt;
+      if (data.signingTokenUsedAt !== undefined) updateData.signing_token_used_at = data.signingTokenUsedAt instanceof Date ? data.signingTokenUsedAt.toISOString() : data.signingTokenUsedAt;
       if (data.passwordHash !== undefined) updateData.password_hash = data.passwordHash;
 
+      console.log("[DB UPDATE] Attempting update with data:", {
+        id,
+        updateData,
+        useServiceRole,
+      });
+      
       const { data: contract, error } = await supabase
         .from("contracts")
         .update(updateData)
@@ -349,7 +417,20 @@ export const db = {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error("[DB UPDATE] Database update error:", {
+          error: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          updateData,
+          id,
+          useServiceRole,
+        });
+        throw new Error(`Database update failed: ${error.message}${error.details ? ` (${error.details})` : ""}`);
+      }
+      
+      console.log("[DB UPDATE] Update successful, contract:", contract?.id);
       return contract ? mapContractFromDb(contract) : null;
     },
   },
@@ -470,6 +551,14 @@ export const db = {
         .delete()
         .lt("attempted_at", cutoffDate.toISOString());
     },
+
+    async clearAttemptsForIP(ipAddress: string): Promise<void> {
+      const supabase = await createClient();
+      await supabase
+        .from("signing_attempts")
+        .delete()
+        .eq("ip_address", ipAddress);
+    },
   },
 
   payments: {
@@ -549,6 +638,37 @@ export const db = {
         // Log error but don't throw - audit logging shouldn't break the operation
         console.error("Failed to log contract event:", error);
       }
+    },
+
+    async findByContractId(contractId: string): Promise<Array<{
+      id: string;
+      eventType: string;
+      actorType: string;
+      actorId: string | null;
+      metadata: Record<string, any>;
+      createdAt: Date;
+    }>> {
+      const supabase = await import("./supabase-server").then(m => m.createClient());
+      
+      const { data, error } = await supabase
+        .from("contract_events")
+        .select("*")
+        .eq("contract_id", contractId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Failed to fetch contract events:", error);
+        return [];
+      }
+
+      return (data || []).map((event: any) => ({
+        id: event.id,
+        eventType: event.event_type,
+        actorType: event.actor_type,
+        actorId: event.actor_id,
+        metadata: event.metadata || {},
+        createdAt: new Date(event.created_at),
+      }));
     },
   },
 

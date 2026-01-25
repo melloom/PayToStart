@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getSignature } from "@/lib/signature";
+import { getSignature, getAllSignatures } from "@/lib/signature";
 import { getEffectiveTier } from "@/lib/subscriptions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { Mail, FileText, X, Send, Download, Clock, CheckCircle, DollarSign, File
 import { format } from "date-fns";
 import { CopyButton } from "@/components/copy-button";
 import ContractActions from "./contract-actions";
-import { ContractPreview } from "@/components/contract-preview";
+import { ContractPreviewWrapper } from "@/components/contract-preview-wrapper";
 import { ContractStatusPoller } from "@/components/contract-status-poller";
 import { UpdateStyleButton } from "@/app/(dashboard)/contracts/[id]/update-style-button";
 import { PasswordToggle } from "./password-toggle";
@@ -72,9 +72,10 @@ export default async function ContractDetailPage({
   }
 
   // Fetch data in parallel for better performance - with error handling
-  const [client, signature, payments, effectiveTier, company] = await Promise.all([
+  const [client, signature, allSignatures, payments, effectiveTier, company] = await Promise.all([
     db.clients.findById(contract.clientId).catch(() => null),
     getSignature(contract.id).catch(() => null),
+    getAllSignatures(contract.id, contract.clientId, contract.contractorId).catch(() => ({ clientSignature: null, contractorSignature: null })),
     db.payments.findByContractId(contract.id).catch(() => []),
     getEffectiveTier(contractor.companyId),
     db.companies.findById(contractor.companyId).catch(() => null),
@@ -128,9 +129,13 @@ export default async function ContractDetailPage({
     );
   };
 
-  // Build timeline events
+  // Fetch contract events from audit log
+  const contractEvents = await db.contractEvents.findByContractId(contract.id);
+
+  // Build timeline events from contract events
   const timelineEvents = [];
   
+  // Always show created event
   timelineEvents.push({
     type: "created",
     title: "Contract Created",
@@ -139,18 +144,13 @@ export default async function ContractDetailPage({
     description: "Contract was created",
   });
 
-  // Only show "Contract Sent" if status is "sent" AND the contract was actually sent
-  // Newly created contracts often have status "sent" but haven't been emailed yet
-  // Only show if updatedAt is significantly different from createdAt (5+ minutes)
-  // This indicates the contract was actually sent, not just created
-  const timeDifference = contract.updatedAt.getTime() - contract.createdAt.getTime();
-  const wasActuallySent = contract.status === "sent" && timeDifference > 300000; // More than 5 minutes difference
-  
-  if (wasActuallySent) {
+  // Add "sent" event if it exists in contract events
+  const sentEvent = contractEvents.find(e => e.eventType === "sent");
+  if (sentEvent) {
     timelineEvents.push({
       type: "sent",
       title: "Contract Sent",
-      date: contract.updatedAt,
+      date: sentEvent.createdAt,
       icon: Send,
       description: "Contract was sent to client",
     });
@@ -236,10 +236,12 @@ export default async function ContractDetailPage({
             <CardContent className="p-0 w-full overflow-hidden">
               <div className="border-2 border-gray-200 dark:border-slate-700 rounded-b-lg overflow-hidden bg-white dark:bg-slate-950 p-6 max-h-[800px] overflow-y-auto overflow-x-hidden custom-scrollbar w-full">
                 <div className="w-full min-w-0">
-                  <ContractPreview
+                  <ContractPreviewWrapper
                     contract={contract}
                     client={client || { name: "Client", email: "" }}
                     contractor={contractorInfo}
+                    initialClientSignature={allSignatures.clientSignature}
+                    initialContractorSignature={allSignatures.contractorSignature}
                   />
                 </div>
               </div>
@@ -334,21 +336,47 @@ export default async function ContractDetailPage({
                 <CardTitle className="text-xl">Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 w-full">
-                {contract.status === "sent" && (
-                  <>
-                    <div className="flex items-center space-x-2 mb-4 w-full min-w-0">
-                      <Input
-                        value={signingUrl}
-                        readOnly
-                        className="flex-1 text-sm min-w-0"
-                      />
-                      <CopyButton value={signingUrl} />
-                    </div>
-                    <div className="w-full">
-                      <ContractActions contractId={contract.id} clientEmail={client?.email || ""} signingUrl={signingUrl} />
-                    </div>
-                  </>
+                {/* Signing URL - show for sent, signed, paid statuses */}
+                {(contract.status === "sent" || contract.status === "signed" || contract.status === "paid") && signingUrl && (
+                  <div className="flex items-center space-x-2 mb-4 w-full min-w-0">
+                    <Input
+                      value={signingUrl}
+                      readOnly
+                      className="flex-1 text-sm min-w-0"
+                    />
+                    <CopyButton value={signingUrl} />
+                  </div>
                 )}
+                
+                {/* Contract Actions - show for all statuses except cancelled/completed */}
+                <div className="w-full">
+                  <ContractActions 
+                    contractId={contract.id} 
+                    clientEmail={client?.email || ""} 
+                    signingUrl={signingUrl}
+                    contractStatus={contract.status}
+                    hasClientSignature={!!allSignatures.clientSignature}
+                    hasContractorSignature={!!allSignatures.contractorSignature}
+                    depositAmount={contract.depositAmount}
+                    totalAmount={contract.totalAmount}
+                  />
+                </div>
+                
+                {/* Email Client - show for sent, signed, paid statuses */}
+                {(contract.status === "sent" || contract.status === "signed" || contract.status === "paid") && client?.email && (
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <a href={`mailto:${client.email}?subject=Contract Signing&body=Please sign the contract at: ${signingUrl || ''}`}>
+                      <Mail className="h-4 w-4 mr-2" />
+                      Email Client
+                    </a>
+                  </Button>
+                )}
+                
+                {/* Void Contract - show for draft, ready, sent statuses */}
                 {(contract.status === "draft" || contract.status === "ready" || contract.status === "sent") && (
                   <form action={`/api/contracts/${contract.id}/void`} method="POST" className="w-full">
                     <Button
@@ -361,18 +389,8 @@ export default async function ContractDetailPage({
                     </Button>
                   </form>
                 )}
-                {contract.status === "sent" && client?.email && (
-                  <Button
-                    asChild
-                    variant="outline"
-                    className="w-full"
-                  >
-                    <a href={`mailto:${client.email}?subject=Contract Signing&body=Please sign the contract at: ${signingUrl}`}>
-                      <Mail className="h-4 w-4 mr-2" />
-                      Email Client
-                    </a>
-                  </Button>
-                )}
+                
+                {/* Style and Password Settings - show for all statuses */}
                 <div className="w-full pt-2 mt-2">
                   <UpdateStyleButton
                     contractId={contract.id}

@@ -8,7 +8,9 @@
     "start": "next start -p 3000",
     "lint": "next lint",
     "vercel": "vercel",
-    "test:trial": "node scripts/test-trial.js"
+    "test:trial": "node scripts/test-trial.js",
+    "test:payment": "node scripts/test-payment-flow.js",
+    "test:payment-e2e": "node scripts/test-payment-e2e.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.4",

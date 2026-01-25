@@ -28,7 +28,7 @@ interface ContractWithClient extends Contract {
   clientName: string;
 }
 
-type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
+type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "cancelled" | "drafts";
 
 export default function ContractsListClient({
   contracts,
@@ -47,13 +47,8 @@ export default function ContractsListClient({
     
     // Apply status filter
     if (filter !== "all" && filter !== "drafts") {
-      if (filter === "draft") {
-        // Filter for draft contracts (status: "draft")
-        filtered = filtered.filter((c) => c.status === "draft");
-      } else {
-        // Filter for other statuses (including "ready")
-        filtered = filtered.filter((c) => c.status === filter);
-      }
+      // Filter for other statuses (including "ready")
+      filtered = filtered.filter((c) => c.status === filter);
     }
     
     // Apply search query
@@ -149,7 +144,6 @@ export default function ContractsListClient({
 
   const filters: { value: FilterType; label: string; icon: React.ReactNode }[] = [
     { value: "all", label: "All", icon: <FileText className="h-4 w-4" /> },
-    { value: "draft", label: "Draft Contracts", icon: <FileText className="h-4 w-4" /> },
     { value: "ready", label: "Ready to Send", icon: <CheckCircle2 className="h-4 w-4" /> },
     { value: "drafts", label: "Draft Templates", icon: <PenTool className="h-4 w-4" /> },
     { value: "sent", label: "Pending", icon: <Clock className="h-4 w-4" /> },
@@ -172,8 +166,6 @@ export default function ContractsListClient({
               <Badge variant="outline" className="bg-slate-700/50 text-slate-200 border-slate-600/50">
                 {filter === "drafts" 
                   ? `${filteredDrafts.length} ${filteredDrafts.length === 1 ? "template" : "templates"}`
-                  : filter === "draft"
-                  ? `${filteredContracts.length} ${filteredContracts.length === 1 ? "draft contract" : "draft contracts"}`
                   : `${filteredContracts.length} ${filteredContracts.length === 1 ? "contract" : "contracts"}`}
                 {filter === "all" && drafts.length > 0 && (
                   <span className="ml-2 text-amber-400">+ {drafts.length} templates</span>
