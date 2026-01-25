@@ -59,15 +59,24 @@ function CardInputForm({ customerId, hasActiveSubscription, onCardAdded }: Subsc
 
       try {
         const response = await fetch("/api/subscriptions/payment-methods");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
 
-        if (response.ok && data.paymentMethods && data.paymentMethods.length > 0) {
+        if (data.paymentMethods && data.paymentMethods.length > 0) {
           // Find the default payment method
           const defaultCard = data.paymentMethods.find((pm: any) => pm.isDefault) || data.paymentMethods[0];
           setCurrentCard(defaultCard);
         }
       } catch (error) {
-        console.error("Error loading current card:", error);
+        // Only log if it's not a network error (which might be expected in some cases)
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          // Network error - might be offline or server issue
+          console.warn("Network error loading current card - this may be expected if offline");
+        } else {
+          console.error("Error loading current card:", error);
+        }
       } finally {
         setIsLoadingCard(false);
       }

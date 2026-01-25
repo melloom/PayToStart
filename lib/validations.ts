@@ -40,36 +40,49 @@ export type TemplateVariablesSchema = z.infer<typeof templateVariablesSchema>;
  * Contract creation payload schema
  */
 export const contractCreateSchema = z.object({
-  // Client information (for new clients)
-  clientName: z.string().min(1, "Client name is required").max(200),
-  clientEmail: z.string().email("Invalid email address").max(200),
+  // Client information (for new clients) - optional if clientId is provided
+  clientName: z.string().max(200).optional(),
+  clientEmail: z.string().email("Invalid email address").max(200).optional(),
   clientPhone: z.string().optional().nullable(),
   
   // Or use existing client
   clientId: z.string().uuid().optional(),
   
   // Template information (optional)
-  templateId: z.string().uuid().optional(),
+  templateId: z.string().uuid().optional().nullable(),
   
-  // Template variables (if using a template)
-  fieldValues: z.record(z.string(), z.string()).optional().default({}),
+  // Template variables (if using a template) - accept any values
+  fieldValues: z.record(z.string(), z.any()).optional().default({}),
   
   // Contract details
   title: z.string().min(1, "Contract title is required").max(500),
   content: z.string().min(1, "Contract content is required"),
   
-  // Financial details
-  depositAmount: z.coerce.number().min(0, "Deposit must be non-negative").max(10000000, "Deposit amount too large"),
-  totalAmount: z.coerce.number().min(0, "Total amount must be non-negative").max(10000000, "Total amount too large"),
+  // Financial details - accept both string and number, default to 0
+  depositAmount: z.preprocess(
+    (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      const num = typeof val === 'string' ? parseFloat(val) : Number(val);
+      return isNaN(num) ? 0 : num;
+    },
+    z.number().min(0, "Deposit must be non-negative").max(10000000, "Deposit amount too large")
+  ).default(0),
+  totalAmount: z.preprocess(
+    (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      const num = typeof val === 'string' ? parseFloat(val) : Number(val);
+      return isNaN(num) ? 0 : num;
+    },
+    z.number().min(0, "Total amount must be non-negative").max(10000000, "Total amount too large")
+  ).default(0),
+  
+  // Additional optional fields that might be sent
+  hasCompensation: z.boolean().optional(),
+  compensationType: z.string().optional(),
+  paymentTerms: z.string().optional().nullable(),
+  paymentSchedule: z.enum(["upfront", "partial", "full", "split", "incremental"]).optional(),
+  paymentScheduleConfig: z.record(z.any()).optional(),
 }).refine(
-  (data) => {
-    // Either clientName/clientEmail OR clientId must be provided
-    return (data.clientName && data.clientEmail) || data.clientId;
-  },
-  {
-    message: "Either provide clientName/clientEmail or clientId",
-  }
-).refine(
   (data) => {
     // If deposit is provided, it should be less than or equal to total
     return data.depositAmount <= data.totalAmount;
@@ -99,11 +112,30 @@ export const signingPayloadSchema = z.object({
     .refine(
       (val) => {
         if (!val) return true; // Optional
-        // Validate it's a data URL
-        return val.startsWith("data:image/") && val.includes(";base64,");
+        // Validate it's a data URL with image
+        if (!val.startsWith("data:image/") || !val.includes(";base64,")) {
+          return false;
+        }
+        // Validate image type (only allow safe image types)
+        const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+        const typeMatch = val.match(/data:image\/([^;]+)/);
+        if (!typeMatch || !allowedTypes.includes(`image/${typeMatch[1]}`)) {
+          return false;
+        }
+        // Validate base64 data exists
+        const base64Match = val.match(/;base64,(.+)$/);
+        if (!base64Match || !base64Match[1]) {
+          return false;
+        }
+        // Check base64 data size (max 2MB)
+        const estimatedSize = (base64Match[1].length * 3) / 4;
+        if (estimatedSize > 2 * 1024 * 1024) {
+          return false;
+        }
+        return true;
       },
       {
-        message: "Signature must be a valid base64 image data URL",
+        message: "Signature must be a valid base64 image data URL (PNG, JPEG, or WebP, max 2MB)",
       }
     ),
   ip: z.string().optional(),

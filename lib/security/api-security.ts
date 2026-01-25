@@ -260,13 +260,22 @@ export function containsSQLInjection(input: string): boolean {
     return false;
   }
   
+  // More specific patterns that indicate actual SQL injection attempts
+  // Not just SQL keywords (which can appear in legitimate content)
   const sqlPatterns = [
-    /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|SCRIPT)\b)/gi,
-    /('|(\\')|(;)|(\\;)|(\|)|(\\|)|(\*)|(\\*)|(%)|(\\%)|(_)|(\\_))/g,
-    /(\bOR\b.*=.*)/gi,
-    /(\bAND\b.*=.*)/gi,
-    /\/\*.*?\*\//g,
-    /(--)/g,
+    // SQL injection patterns with quotes and operators
+    /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION)\b.*['";])/gi,
+    /(['";].*\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION)\b)/gi,
+    // SQL comment injection
+    /(--.*)/g,
+    /(\/\*.*?\*\/)/g,
+    // SQL operator injection patterns
+    /(\bOR\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+['"]?)/gi,
+    /(\bAND\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+['"]?)/gi,
+    // UNION-based injection
+    /(\bUNION\b.*\bSELECT\b)/gi,
+    // Stacked queries
+    /(;\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE))/gi,
   ];
   
   return sqlPatterns.some(pattern => pattern.test(input));
@@ -280,12 +289,18 @@ export function containsCommandInjection(input: string): boolean {
     return false;
   }
   
+  // More specific patterns for actual command injection attempts
+  // Allow template variables like {{fieldName}} and common punctuation
   const commandPatterns = [
-    /[|&;`$()]/,
-    /\b(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown)\b/gi,
-    /\$\{/,
-    /\$\(/,
-    /`/,
+    // Command chaining with pipes/semicolons (actual injection patterns)
+    /(;\s*(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown|wget|curl|nc|netcat)\b)/gi,
+    /(\|\s*(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown|wget|curl|nc|netcat)\b)/gi,
+    // Command substitution with backticks (actual injection)
+    /(`[^`]*\b(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown|wget|curl|nc|netcat)\b[^`]*`)/gi,
+    // Bash command substitution (actual injection)
+    /\$\([^)]*\b(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown|wget|curl|nc|netcat)\b[^)]*\)/gi,
+    // Dangerous command with redirects
+    /\b(cat|ls|pwd|whoami|id|uname|ps|kill|rm|mv|cp|chmod|chown|wget|curl|nc|netcat)\b.*[<>|]/gi,
   ];
   
   return commandPatterns.some(pattern => pattern.test(input));
@@ -426,25 +441,33 @@ export function validateCSRFToken(
 
 /**
  * Validate request for injection attacks
+ * @param input - The input to validate
+ * @param skipFields - Array of field names to skip validation (e.g., 'content' for contract content that may contain SQL keywords)
+ * @param fieldPath - Internal parameter to track field path for error reporting
  */
-export function validateRequestSecurity(input: any): { valid: boolean; errors: string[] } {
+export function validateRequestSecurity(input: any, skipFields: string[] = [], fieldPath: string = ''): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   
   if (typeof input === "string") {
     if (containsSQLInjection(input)) {
-      errors.push("Potential SQL injection detected");
+      errors.push(`Potential SQL injection detected${fieldPath ? ` in field: ${fieldPath}` : ''}`);
     }
     if (containsCommandInjection(input)) {
-      errors.push("Potential command injection detected");
+      errors.push(`Potential command injection detected${fieldPath ? ` in field: ${fieldPath}` : ''}`);
     }
     if (containsXSS(input)) {
-      errors.push("Potential XSS attack detected");
+      errors.push(`Potential XSS attack detected${fieldPath ? ` in field: ${fieldPath}` : ''}`);
     }
   } else if (typeof input === "object" && input !== null) {
     // Recursively check object properties
     for (const key in input) {
       if (Object.prototype.hasOwnProperty.call(input, key)) {
-        const result = validateRequestSecurity(input[key]);
+        // Skip validation for specified fields (e.g., contract content)
+        if (skipFields.includes(key)) {
+          continue;
+        }
+        const currentPath = fieldPath ? `${fieldPath}.${key}` : key;
+        const result = validateRequestSecurity(input[key], skipFields, currentPath);
         if (!result.valid) {
           errors.push(...result.errors);
         }

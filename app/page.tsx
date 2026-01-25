@@ -541,9 +541,9 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <motion.div
           className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-5xl mx-auto"
-          initial={{ opacity: 0, y: 40 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6, duration: 0.8 }}
+          transition={{ delay: 0.6, duration: 0.5 }}
         >
           {[
             { value: "10K+", label: "Contracts Signed", icon: FileText, color: "from-blue-500 to-cyan-500" },
@@ -554,9 +554,10 @@ export default function LandingPage() {
             <motion.div
               key={index}
               className="text-center bg-slate-800/60 backdrop-blur-sm rounded-xl p-6 border border-slate-700 shadow-sm hover:shadow-md transition-all"
-              initial={{ opacity: 0, y: 20 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.7 + index * 0.1 }}
+              transition={{ delay: 0.7 + index * 0.05, duration: 0.3, ease: "easeOut" }}
               whileHover={{ y: -4 }}
             >
               <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${stat.color} flex items-center justify-center mx-auto mb-3 shadow-md`}>
@@ -594,10 +595,11 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <div className="grid md:grid-cols-2 gap-12 items-center">
           <motion.div
-            initial={{ opacity: 0, x: -30 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, x: -20 }}
             whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
           >
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-50 border border-red-200 mb-6">
               <span className="text-sm font-semibold text-red-700">The Problem</span>
@@ -624,10 +626,11 @@ export default function LandingPage() {
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, x: 30 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, x: 20 }}
             whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
             className="relative"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-3xl transform rotate-3 opacity-20"></div>
@@ -664,10 +667,11 @@ export default function LandingPage() {
       <section id="features" className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <motion.div 
             className="text-center mb-16"
-            initial={{ opacity: 0, y: 20 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, y: 15 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
           >
             <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
               Everything you need to manage contracts
@@ -682,10 +686,11 @@ export default function LandingPage() {
             <motion.div
               key={feature.id}
               className="p-8 rounded-xl bg-slate-800 border border-slate-700 hover:border-indigo-500 hover:shadow-xl transition-all group"
-              initial={{ opacity: 0, y: 30 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.4 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
               whileHover={{ y: -4 }}
             >
               <div className={`flex items-center justify-center w-12 h-12 rounded-lg ${feature.iconBg} ${feature.iconHover} mb-6 transition-colors`}>
@@ -702,10 +707,11 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <motion.div 
           className="text-center mb-12"
-          initial={{ opacity: 0, y: 20 }}
+          style={{ willChange: 'transform, opacity' }}
+          initial={{ opacity: 0, y: 15 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
           <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
             See Pay2Start in Action
@@ -717,10 +723,11 @@ export default function LandingPage() {
 
         <motion.div
           className="relative max-w-5xl mx-auto"
-          initial={{ opacity: 0, scale: 0.95 }}
+          style={{ willChange: 'transform, opacity' }}
+          initial={{ opacity: 0, scale: 0.98 }}
           whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
           <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-700">
             {/* Video Placeholder */}
@@ -755,10 +762,11 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div 
             className="text-center mb-16"
-            initial={{ opacity: 0, y: 20 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, y: 15 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
           >
             <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
               How It Works
@@ -802,10 +810,11 @@ export default function LandingPage() {
               <motion.div
                 key={index}
                 className="relative"
-                initial={{ opacity: 0, y: 30 }}
+                style={{ willChange: 'transform, opacity' }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.1, duration: 0.6 }}
+                viewport={{ once: true, margin: "-100px" }}
+                transition={{ delay: index * 0.05, duration: 0.3, ease: "easeOut" }}
               >
                 <div className="bg-slate-800 rounded-2xl p-8 shadow-lg border-2 border-slate-700 hover:border-indigo-500 hover:shadow-xl transition-all h-full">
                   <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${step.color} flex items-center justify-center text-white text-2xl font-bold mb-6 shadow-lg`}>
@@ -850,10 +859,11 @@ export default function LandingPage() {
             <motion.div
               key={testimonial.id}
               className="bg-slate-800 border-2 border-slate-700 rounded-2xl p-8 shadow-lg hover:shadow-xl hover:border-indigo-500 transition-all"
-              initial={{ opacity: 0, y: 30 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.4 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
             >
               <div className="flex items-center gap-1 mb-4">
                 {Array.from({ length: testimonial.rating }, (_, i) => (
@@ -883,10 +893,11 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div 
             className="text-center mb-16"
-            initial={{ opacity: 0, y: 20 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, y: 15 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
           >
             <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
               Perfect for Every Contractor
@@ -903,10 +914,11 @@ export default function LandingPage() {
                 <motion.div
                   key={useCase.id}
                   className="bg-slate-800 rounded-xl p-6 border-2 border-slate-700 hover:border-indigo-500 hover:shadow-lg transition-all group"
-                  initial={{ opacity: 0, y: 20 }}
+                  style={{ willChange: 'transform, opacity' }}
+                  initial={{ opacity: 0, y: 15 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: "-100px" }}
-                  transition={{ duration: 0.3 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
                 >
                   <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${useCase.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                     <IconComponent className="h-6 w-6 text-white" />
@@ -925,10 +937,11 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
             <motion.div
-              initial={{ opacity: 0, x: -30 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
             >
               <h2 className="text-4xl md:text-5xl font-bold mb-8 text-white">
                 Why contractors choose Pay2Start
@@ -941,10 +954,11 @@ export default function LandingPage() {
                   <motion.div
                     key={benefit.id}
                     className="flex items-start gap-4"
-                    initial={{ opacity: 0, x: -20 }}
+                    style={{ willChange: 'transform, opacity' }}
+                    initial={{ opacity: 0, x: -15 }}
                     whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ once: true, margin: "-50px" }}
-                    transition={{ duration: 0.4 }}
+                    viewport={{ once: true, margin: "-100px" }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
                   >
                     <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
                       <benefit.icon className="h-5 w-5 text-indigo-400" />
@@ -960,10 +974,11 @@ export default function LandingPage() {
             
             <motion.div
               className="relative"
-              initial={{ opacity: 0, x: 30 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, x: 20 }}
               whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
             >
               <div className="relative bg-gradient-to-br from-indigo-600 to-purple-600 rounded-2xl p-10 shadow-2xl">
                 <div className="space-y-8">
@@ -1002,15 +1017,16 @@ export default function LandingPage() {
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Before */}
-          <motion.div
-            className="bg-red-950/30 border-2 border-red-900/50 rounded-2xl p-8"
-            initial={{ opacity: 0, x: -30 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-          >
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Before */}
+            <motion.div
+              className="bg-red-950/30 border-2 border-red-900/50 rounded-2xl p-8"
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
             <div className="flex items-center gap-3 mb-6">
               <div className="w-12 h-12 rounded-xl bg-red-500 flex items-center justify-center">
                 <span className="text-white text-xl font-bold">×</span>
@@ -1036,10 +1052,11 @@ export default function LandingPage() {
           {/* After */}
           <motion.div
             className="bg-green-950/30 border-2 border-green-900/50 rounded-2xl p-8 relative overflow-hidden"
-            initial={{ opacity: 0, x: 30 }}
+            style={{ willChange: 'transform, opacity' }}
+            initial={{ opacity: 0, x: 20 }}
             whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
+            viewport={{ once: true, margin: "-100px" }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
           >
             <div className="absolute top-4 right-4 px-3 py-1 bg-green-500 text-white text-xs font-bold rounded-full">
               NEW
@@ -1072,10 +1089,11 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <motion.div
           className="text-center mb-12"
-          initial={{ opacity: 0, y: 20 }}
+          style={{ willChange: 'transform, opacity' }}
+          initial={{ opacity: 0, y: 15 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
           <p className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-6">Trusted & Secure</p>
           <div className="flex flex-wrap items-center justify-center gap-8">
@@ -1085,10 +1103,11 @@ export default function LandingPage() {
                 <motion.div
                   key={badge.id}
                   className="flex items-center gap-2 px-6 py-3 bg-slate-800 border-2 border-slate-700 rounded-lg hover:border-indigo-500 transition-all"
-                  initial={{ opacity: 0, y: 10 }}
+                  style={{ willChange: 'transform, opacity' }}
+                  initial={{ opacity: 0, y: 8 }}
                   whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true, margin: "-50px" }}
-                  transition={{ duration: 0.3 }}
+                  viewport={{ once: true, margin: "-100px" }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
                 >
                   <IconComponent className="h-5 w-5 text-indigo-400" />
                   <span className="font-semibold text-slate-300">{badge.name}</span>
@@ -1103,17 +1122,19 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <motion.div
           className="bg-gradient-to-r from-slate-800 via-indigo-900/30 to-purple-900/30 rounded-2xl p-12 border-2 border-slate-700 shadow-lg"
-          initial={{ opacity: 0, y: 20 }}
+          style={{ willChange: 'transform, opacity' }}
+          initial={{ opacity: 0, y: 15 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
           <div className="grid md:grid-cols-3 gap-8 text-center">
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.98 }}
               whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ delay: 0.05, duration: 0.3, ease: "easeOut" }}
             >
               <div className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
                 10,000+
@@ -1122,10 +1143,11 @@ export default function LandingPage() {
               <p className="text-slate-500 text-sm mt-1">And counting</p>
             </motion.div>
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.98 }}
               whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.2 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ delay: 0.1, duration: 0.3, ease: "easeOut" }}
             >
               <div className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent mb-2">
                 5,000+
@@ -1134,10 +1156,11 @@ export default function LandingPage() {
               <p className="text-slate-500 text-sm mt-1">Growing daily</p>
             </motion.div>
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
+              style={{ willChange: 'transform, opacity' }}
+              initial={{ opacity: 0, scale: 0.98 }}
               whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.3 }}
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ delay: 0.15, duration: 0.3, ease: "easeOut" }}
             >
               <div className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent mb-2">
                 $50M+
@@ -1153,10 +1176,11 @@ export default function LandingPage() {
       <section className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
         <motion.div
           className="relative bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 rounded-3xl p-12 md:p-16 shadow-2xl overflow-hidden"
-          initial={{ opacity: 0, scale: 0.95 }}
+          style={{ willChange: 'transform, opacity' }}
+          initial={{ opacity: 0, scale: 0.98 }}
           whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
         >
           {/* Animated background */}
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:24px_24px]"></div>

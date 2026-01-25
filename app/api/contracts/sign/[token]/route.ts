@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { saveSignature, generateContractHash } from "@/lib/signature";
 import { createDepositCheckoutSession } from "@/lib/payments";
-import { hashToken, verifyToken, isTokenExpired, getRateLimitConfig } from "@/lib/security/tokens";
+import { hashToken, verifyToken, isTokenExpired, getRateLimitConfig, verifyPassword } from "@/lib/security/tokens";
 import { sendEmail } from "@/lib/email";
 import { sendNotificationIfEnabled } from "@/lib/email/notifications";
 import { getSignedButUnpaidEmail, getContractSignedEmail } from "@/lib/email/templates";
@@ -138,17 +138,69 @@ export async function GET(
 ) {
   try {
     const ipAddress = getClientIP(request);
+    
+    // Validate token format (should be hex string, 64 chars for 32 bytes)
+    if (!params.token || typeof params.token !== "string" || !/^[a-f0-9]{64}$/i.test(params.token)) {
+      log.warn({ 
+        ipAddress,
+        tokenLength: params.token?.length 
+      }, "Invalid token format in signing request");
+      return NextResponse.json(
+        { message: "Invalid link" },
+        { status: 400 }
+      );
+    }
+
     const { contract, error } = await verifySigningToken(params.token, ipAddress);
 
     if (!contract || error) {
+      // Don't leak information about whether contract exists
       return NextResponse.json(
-        { message: error || "Contract not found" },
+        { message: "Invalid or expired signing link" },
         { status: 404 }
       );
     }
 
+    // Check if contract requires password - SECURITY: Do this BEFORE returning any contract data
+    const requiresPassword = !!contract.passwordHash;
+    
+    // Check for password in request (from query param)
+    const url = new URL(request.url);
+    const providedPassword = url.searchParams.get("password");
+    
+    if (requiresPassword) {
+      if (!providedPassword) {
+        // Don't return any contract data - just indicate password is required
+        return NextResponse.json(
+          { 
+            message: "Password required to view this contract",
+            requiresPassword: true 
+          },
+          { status: 401 }
+        );
+      }
+      
+      // Verify password using timing-safe comparison
+      if (!verifyPassword(providedPassword, contract.passwordHash!)) {
+        log.warn({
+          contractId: contract.id,
+          ipAddress,
+        }, "Invalid password attempt for contract");
+        // Don't return any contract data - just indicate invalid password
+        return NextResponse.json(
+          { 
+            message: "Invalid password",
+            requiresPassword: true 
+          },
+          { status: 401 }
+        );
+      }
+    }
+
+    // Only fetch and return contract data AFTER password verification passes
     const client = await db.clients.findById(contract.clientId);
 
+    // Return contract data - password verified or not required
     return NextResponse.json({
       contract,
       client,
@@ -180,7 +232,7 @@ export async function POST(
     }
 
     // Check if contract can be signed
-    if (contract.status !== "sent" && contract.status !== "draft") {
+    if (contract.status !== "sent" && contract.status !== "draft" && contract.status !== "ready") {
       return NextResponse.json(
         { message: "Contract already signed or cannot be signed" },
         { status: 400 }
@@ -195,13 +247,76 @@ export async function POST(
       );
     }
 
-    // Parse and validate signing payload
-    const body = await request.json();
+    // Parse and validate signing payload with body size check
+    const bodyText = await request.text();
+    
+    // Check body size (prevent large payload attacks)
+    if (bodyText.length > 5 * 1024 * 1024) { // 5MB max for signature images
+      log.warn({ 
+        contractId: contract.id,
+        bodySize: bodyText.length,
+        ipAddress 
+      }, "Signing request body too large");
+      return NextResponse.json(
+        { message: "Request payload too large" },
+        { status: 413 }
+      );
+    }
+
+    // Parse body
+    let body: any;
+    try {
+      body = JSON.parse(bodyText);
+    } catch (error) {
+      log.warn({ 
+        contractId: contract.id,
+        ipAddress 
+      }, "Invalid JSON in signing request");
+      return NextResponse.json(
+        { message: "Invalid request format" },
+        { status: 400 }
+      );
+    }
+
+    // SECURITY: Verify password BEFORE processing signature
+    // This prevents bypassing password protection by directly calling the POST endpoint
+    if (contract.passwordHash) {
+      const providedPassword = body.password;
+      
+      if (!providedPassword) {
+        return NextResponse.json(
+          { 
+            message: "Password required to sign this contract",
+            requiresPassword: true 
+          },
+          { status: 401 }
+        );
+      }
+      
+      if (!verifyPassword(providedPassword, contract.passwordHash)) {
+        log.warn({
+          contractId: contract.id,
+          ipAddress,
+        }, "Invalid password attempt for contract signing");
+        return NextResponse.json(
+          { 
+            message: "Invalid password",
+            requiresPassword: true 
+          },
+          { status: 401 }
+        );
+      }
+      
+      // Password verified - remove password from body before validation (it's not part of signing schema)
+      delete body.password;
+    }
+
     const validationResult = signingPayloadSchema.safeParse(body);
     
     if (!validationResult.success) {
       log.warn({ 
-        contractId: contract.id, 
+        contractId: contract.id,
+        ipAddress,
         errors: validationResult.error.errors 
       }, "Signing payload validation failed");
       return NextResponse.json(
@@ -215,15 +330,93 @@ export async function POST(
 
     const { fullName, signatureDataUrl, ip, userAgent } = validationResult.data;
 
+    // Additional security: Sanitize and validate signature data URL
+    let sanitizedSignatureUrl: string | null = null;
+    if (signatureDataUrl) {
+      // Validate it's actually a data URL with image
+      if (!signatureDataUrl.startsWith("data:image/") || !signatureDataUrl.includes(";base64,")) {
+        log.warn({ 
+          contractId: contract.id,
+          ipAddress 
+        }, "Invalid signature data URL format");
+        return NextResponse.json(
+          { message: "Invalid signature format" },
+          { status: 400 }
+        );
+      }
+
+      // Extract and validate base64 data
+      const base64Match = signatureDataUrl.match(/;base64,(.+)$/);
+      if (!base64Match || !base64Match[1]) {
+        log.warn({ 
+          contractId: contract.id,
+          ipAddress 
+        }, "Invalid base64 signature data");
+        return NextResponse.json(
+          { message: "Invalid signature data" },
+          { status: 400 }
+        );
+      }
+
+      // Validate base64 data size (max 2MB for signature images)
+      const base64Data = base64Match[1];
+      const estimatedSize = (base64Data.length * 3) / 4; // Base64 is ~33% larger
+      if (estimatedSize > 2 * 1024 * 1024) {
+        log.warn({ 
+          contractId: contract.id,
+          ipAddress,
+          estimatedSize 
+        }, "Signature image too large");
+        return NextResponse.json(
+          { message: "Signature image too large (max 2MB)" },
+          { status: 400 }
+        );
+      }
+
+      // Validate it's actually valid base64
+      try {
+        Buffer.from(base64Data, "base64");
+      } catch (error) {
+        log.warn({ 
+          contractId: contract.id,
+          ipAddress 
+        }, "Invalid base64 encoding in signature");
+        return NextResponse.json(
+          { message: "Invalid signature encoding" },
+          { status: 400 }
+        );
+      }
+
+      sanitizedSignatureUrl = signatureDataUrl;
+    }
+
+    // Sanitize full name (prevent XSS/injection)
+    const sanitizedName = fullName
+      .trim()
+      .replace(/[<>]/g, "") // Remove angle brackets
+      .replace(/javascript:/gi, "") // Remove javascript protocol
+      .replace(/on\w+\s*=/gi, "") // Remove event handlers
+      .substring(0, 200); // Limit length
+
+    if (sanitizedName.length < 2) {
+      return NextResponse.json(
+        { message: "Invalid name provided" },
+        { status: 400 }
+      );
+    }
+
     // Generate contract hash for integrity verification
     const contractHash = generateContractHash(contract.content);
 
-    // Save signature
+    // Additional security: Verify contract hasn't been tampered with
+    // (This would require storing original hash, but for now we generate at signing time)
+    
+    // Save signature with sanitized data
     await saveSignature(contract.id, contract.companyId, contract.clientId, {
-      fullName: fullName.trim(),
-      signatureDataUrl: signatureDataUrl || null,
-      ip: ip || ipAddress,
-      userAgent: userAgent || "unknown",
+      fullName: sanitizedName,
+      signatureDataUrl: sanitizedSignatureUrl,
+      ip: ipAddress, // Always use server-detected IP, not client-provided
+      userAgent: (userAgent || "unknown").substring(0, 500), // Limit length
       contractHash,
     });
 
@@ -234,19 +427,30 @@ export async function POST(
       signingTokenUsedAt: new Date(), // Rotate token after first use
     });
 
-    // Log audit event
+    // Log audit event with security information
     await db.contractEvents.logEvent({
       contractId: contract.id,
       eventType: "signed",
       actorType: "client",
       actorId: contract.clientId,
       metadata: {
-        fullName: fullName.trim(),
-        ip: ip || ipAddress,
-        userAgent: userAgent || "unknown",
-        hasSignatureImage: !!signatureDataUrl,
+        fullName: sanitizedName,
+        ip: ipAddress,
+        userAgent: (userAgent || "unknown").substring(0, 200),
+        hasSignatureImage: !!sanitizedSignatureUrl,
+        tokenUsed: true,
+        contractHash,
       },
     });
+
+    // Security logging
+    log.info({
+      event: "contract_signed",
+      contractId: contract.id,
+      clientId: contract.clientId,
+      ipAddress,
+      hasSignature: !!sanitizedSignatureUrl,
+    }, "Contract signed successfully");
 
     if (!updatedContract) {
       return NextResponse.json(

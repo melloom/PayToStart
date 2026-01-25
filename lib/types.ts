@@ -1,5 +1,6 @@
 export type ContractStatus =
   | "draft"
+  | "ready"
   | "sent"
   | "signed"
   | "paid"
@@ -55,6 +56,7 @@ export interface Contract {
   fieldValues: Record<string, string>;
   depositAmount: number;
   totalAmount: number;
+  contractType?: "contract" | "proposal"; // "contract" = client pays contractor, "proposal" = contractor offers to pay client
   signedAt?: Date;
   paidAt?: Date;
   completedAt?: Date;
@@ -62,6 +64,7 @@ export interface Contract {
   signingTokenHash?: string; // Secure hash of the token
   signingTokenExpiresAt?: Date; // Token expiry date
   signingTokenUsedAt?: Date; // When token was first used (for one-time use)
+  passwordHash?: string; // Hashed password for contract access (optional)
   pdfUrl?: string;
   createdAt: Date;
   updatedAt: Date;

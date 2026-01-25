@@ -268,6 +268,7 @@ export const db = {
     async create(data: Omit<Contract, "id" | "createdAt" | "updatedAt"> & {
       signingTokenHash?: string;
       signingTokenExpiresAt?: Date;
+      passwordHash?: string;
     }): Promise<Contract> {
       const supabase = await createClient();
       const { data: contract, error } = await supabase
@@ -286,6 +287,7 @@ export const db = {
           signing_token: data.signingToken, // Keep for backwards compatibility
           signing_token_hash: data.signingTokenHash || null,
           signing_token_expires_at: data.signingTokenExpiresAt || null,
+          password_hash: data.passwordHash || null,
         })
         .select()
         .single();
@@ -338,6 +340,7 @@ export const db = {
       if (data.completedAt !== undefined) updateData.completed_at = data.completedAt;
       if (data.pdfUrl !== undefined) updateData.pdf_url = data.pdfUrl;
       if (data.signingTokenUsedAt !== undefined) updateData.signing_token_used_at = data.signingTokenUsedAt;
+      if (data.passwordHash !== undefined) updateData.password_hash = data.passwordHash;
 
       const { data: contract, error } = await supabase
         .from("contracts")
@@ -1079,6 +1082,7 @@ function mapContractFromDb(row: any): Contract {
     paidAt: row.paid_at ? new Date(row.paid_at) : undefined,
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
     signingToken: row.signing_token || "", // Keep for backwards compatibility
+    passwordHash: row.password_hash || undefined,
     pdfUrl: row.pdf_url || undefined,
     companyId: row.company_id,
     createdAt: new Date(row.created_at),

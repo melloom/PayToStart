@@ -37,7 +37,7 @@ interface ContractWithClient extends Contract {
   clientName: string;
 }
 
-type FilterType = "all" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
+type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
 
 export default function ContractsListClient({
   contracts,
@@ -205,6 +205,11 @@ export default function ContractsListClient({
         className: "bg-slate-700/50 text-slate-300 border-slate-600",
         icon: <FileText className="h-3 w-3" />
       },
+      ready: { 
+        variant: "default", 
+        className: "bg-blue-900/50 text-blue-300 border-blue-700",
+        icon: <CheckCircle2 className="h-3 w-3" />
+      },
       sent: { 
         variant: "secondary", 
         className: "bg-amber-900/50 text-amber-300 border-amber-700",
@@ -234,22 +239,33 @@ export default function ContractsListClient({
 
     const config = statusConfig[status] || { variant: "outline", className: "", icon: null };
 
+    const displayText: Record<string, string> = {
+      draft: "Draft",
+      ready: "Ready to Send",
+      sent: "Pending",
+      signed: "Signed",
+      paid: "Paid",
+      completed: "Completed",
+      cancelled: "Cancelled",
+    };
+
     return (
       <Badge variant={config.variant} className={`${config.className} flex items-center gap-1`}>
         {config.icon}
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {displayText[status] || status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     );
   };
 
   const filters: { value: FilterType; label: string; icon: React.ReactNode }[] = [
     { value: "all", label: "All", icon: <FileText className="h-4 w-4" /> },
-    { value: "drafts", label: "Drafts", icon: <Pen className="h-4 w-4" /> },
-    { value: "sent", label: "Sent", icon: <Clock className="h-4 w-4" /> },
+    { value: "draft", label: "Draft Contracts", icon: <FileText className="h-4 w-4" /> },
+    { value: "ready", label: "Ready to Send", icon: <CheckCircle2 className="h-4 w-4" /> },
+    { value: "drafts", label: "Draft Templates", icon: <Pen className="h-4 w-4" /> },
+    { value: "sent", label: "Pending", icon: <Clock className="h-4 w-4" /> },
     { value: "signed", label: "Signed", icon: <CheckCircle2 className="h-4 w-4" /> },
     { value: "paid", label: "Paid", icon: <DollarSign className="h-4 w-4" /> },
     { value: "completed", label: "Completed", icon: <CheckCircle2 className="h-4 w-4" /> },
-    { value: "draft", label: "Draft", icon: <FileText className="h-4 w-4" /> },
     { value: "cancelled", label: "Cancelled", icon: <X className="h-4 w-4" /> },
   ];
 

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
@@ -111,7 +112,7 @@ const RichTextEditor = dynamic(
   }
 );
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface ContractData {
   templateId?: string;
@@ -128,9 +129,13 @@ interface ContractData {
   totalAmount: string;
   title: string;
   content: string;
+  contractType?: "contract" | "proposal"; // "contract" = client pays contractor, "proposal" = contractor offers to pay client
   hasCompensation?: boolean;
   compensationType?: "no_compensation" | "fixed_amount" | "hourly" | "milestone" | "other";
   paymentTerms?: string;
+  usePassword?: boolean;
+  password?: string;
+  confirmPassword?: string;
 }
 
 export default function NewContractPage() {
@@ -153,11 +158,25 @@ export default function NewContractPage() {
     totalAmount: "0",
     title: "",
     content: "",
+    contractType: "contract", // Default to regular contract
     hasCompensation: false,
     compensationType: "no_compensation",
   });
 
-  const progress = ((step - 1) / 4) * 100;
+  const [branding, setBranding] = useState({
+    primaryColor: "#6366f1",
+    secondaryColor: "#8b5cf6",
+    accentColor: "#10b981",
+    fontFamily: "Georgia, serif",
+    fontSize: "normal" as "small" | "normal" | "large",
+    headerStyle: "centered" as "centered" | "left" | "right",
+    showBorder: true,
+    borderStyle: "solid" as "solid" | "double" | "dashed" | "none",
+    backgroundColor: "#ffffff",
+    paperStyle: "clean" as "clean" | "lined" | "subtle",
+  });
+
+  const progress = ((step - 1) / 5) * 100;
 
   useEffect(() => {
     fetchTemplates();
@@ -341,6 +360,7 @@ export default function NewContractPage() {
       ...data,
       fieldValues,
       content,
+      contractType: data.contractType || "contract", // Include contract type from data
     };
 
     // Add compensation data if provided
@@ -356,8 +376,8 @@ export default function NewContractPage() {
     if (compensationData?.hasCompensation) {
       setStep(4);
     } else {
-      // Skip to step 5 (review) if no compensation
-      setStep(5);
+      // Skip to step 6 (styling) if no compensation
+      setStep(6);
     }
   };
 
@@ -367,7 +387,7 @@ export default function NewContractPage() {
       depositAmount,
       totalAmount,
     });
-    setStep(5);
+    setStep(6); // Go to styling step
   };
 
   const handlePreviewSubmit = async () => {
@@ -378,9 +398,14 @@ export default function NewContractPage() {
         content: data.content,
         depositAmount: parseFloat(data.depositAmount) || 0,
         totalAmount: parseFloat(data.totalAmount) || 0,
+        contractType: data.contractType || "contract", // Include contract type
         hasCompensation: data.hasCompensation || false,
         compensationType: data.compensationType || "no_compensation",
         paymentTerms: data.paymentTerms || null,
+        paymentSchedule: data.paymentSchedule,
+        paymentScheduleConfig: data.paymentScheduleConfig,
+        // Include branding/styling settings for PDF generation
+        branding: branding,
       };
 
       if (useNewClient && data.newClient) {
@@ -402,10 +427,12 @@ export default function NewContractPage() {
       if (response.ok) {
         const result = await response.json();
         toast({
-          title: "Contract created",
-          description: "Contract has been created successfully.",
+          title: "Contract created successfully!",
+          description: "Your contract has been saved and sent to the client.",
+          duration: 5000,
         });
-        router.push(`/dashboard/contracts/${result.contract.id}`);
+        // Redirect to contract detail page - use replace for faster navigation
+        router.replace(`/dashboard/contracts/${result.contract.id}`);
       } else {
         const error = await response.json();
         toast({
@@ -430,6 +457,7 @@ export default function NewContractPage() {
     { number: 2, label: "Client", icon: UserPlus },
     { number: 3, label: "Details", icon: Sparkles },
     { number: 4, label: "Payment", icon: DollarSign },
+    { number: 6, label: "Style", icon: FileType },
     { number: 5, label: "Review", icon: CheckCircle2 },
   ];
 
@@ -537,16 +565,28 @@ export default function NewContractPage() {
           <Step4SetAmounts
             depositAmount={data.depositAmount}
             totalAmount={data.totalAmount}
+            contractType={data.contractType || "contract"}
             onSubmit={handleAmountsSubmit}
             onBack={() => setStep(3)}
+          />
+        )}
+
+        {step === 6 && (
+          <Step6Styling
+            data={data}
+            branding={branding}
+            setBranding={setBranding}
+            onSubmit={() => setStep(5)}
+            onBack={() => setStep(data.hasCompensation ? 4 : 3)}
           />
         )}
 
         {step === 5 && (
           <Step5Preview
             data={data}
+            setData={setData}
             onSubmit={handlePreviewSubmit}
-            onBack={() => setStep(data.hasCompensation ? 4 : 3)}
+            onBack={() => setStep(6)}
             isLoading={isLoading}
           />
         )}
@@ -1190,6 +1230,7 @@ function Step3ContractDetails({
   const [values, setValues] = useState<Record<string, string>>(initialFieldValues);
   const [title, setTitle] = useState(data.title);
   const [content, setContent] = useState(data.content);
+  const [contractType, setContractType] = useState<"contract" | "proposal">(data.contractType || "contract");
   const [hasCompensation, setHasCompensation] = useState(data.hasCompensation || false);
   const [compensationType, setCompensationType] = useState<"no_compensation" | "fixed_amount" | "hourly" | "milestone" | "other">(
     (data.compensationType as any) || "no_compensation"
@@ -1819,7 +1860,9 @@ function Step3ContractDetails({
                   {hasCompensation && (
                     <div className="space-y-3 pl-6 border-l-2 border-indigo-500/30">
                       <div className="space-y-2">
-                        <Label className="text-slate-400 text-sm">Compensation Type</Label>
+                        <Label className="text-slate-400 text-sm">
+                          {data.contractType === "proposal" ? "Compensation Structure" : "Compensation Type"}
+                        </Label>
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
@@ -1830,7 +1873,7 @@ function Step3ContractDetails({
                                 : "bg-slate-700/50 border-slate-600 text-slate-400 hover:border-slate-500"
                             }`}
                           >
-                            Fixed Amount
+                            {data.contractType === "proposal" ? "Fixed Offer" : "Fixed Amount"}
                           </button>
                           <button
                             type="button"
@@ -1841,7 +1884,7 @@ function Step3ContractDetails({
                                 : "bg-slate-700/50 border-slate-600 text-slate-400 hover:border-slate-500"
                             }`}
                           >
-                            Hourly Rate
+                            {data.contractType === "proposal" ? "Hourly Rate Offer" : "Hourly Rate"}
                           </button>
                           <button
                             type="button"
@@ -1852,7 +1895,7 @@ function Step3ContractDetails({
                                 : "bg-slate-700/50 border-slate-600 text-slate-400 hover:border-slate-500"
                             }`}
                           >
-                            Milestone-Based
+                            {data.contractType === "proposal" ? "Milestone-Based Offer" : "Milestone-Based"}
                           </button>
                           <button
                             type="button"
@@ -1869,24 +1912,32 @@ function Step3ContractDetails({
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="paymentTerms" className="text-slate-400 text-sm">
-                          Payment Terms & Legal Clauses
+                          {data.contractType === "proposal" 
+                            ? "Compensation Terms & Legal Clauses" 
+                            : "Payment Terms & Legal Clauses"}
                         </Label>
                         <Textarea
                           id="paymentTerms"
                           className="bg-slate-700/50 border-slate-600 text-white min-h-[80px]"
                           value={paymentTerms}
                           onChange={(e) => setPaymentTerms(e.target.value)}
-                          placeholder="E.g., Net 30 days, payment due upon completion, late fees, etc."
+                          placeholder={data.contractType === "proposal"
+                            ? "E.g., Compensation schedule, when payments will be made, terms of the offer, etc."
+                            : "E.g., Net 30 days, payment due upon completion, late fees, etc."}
                         />
                         <p className="text-xs text-slate-500">
-                          Specify payment terms, schedules, penalties, and other legal payment-related clauses
+                          {data.contractType === "proposal"
+                            ? "Specify compensation terms, payment schedules, and other legal clauses for your offer"
+                            : "Specify payment terms, schedules, penalties, and other legal payment-related clauses"}
                         </p>
                       </div>
                     </div>
                   )}
                   {!hasCompensation && (
                     <p className="text-xs text-slate-500 pl-6 border-l-2 border-slate-700">
-                      No compensation or payment will be specified for this contract
+                      {data.contractType === "proposal"
+                        ? "No compensation will be specified for this proposal"
+                        : "No compensation or payment will be specified for this contract"}
                     </p>
                   )}
                 </div>
@@ -4757,17 +4808,68 @@ Client: _________________________ Date: _________`
         <div className="lg:col-span-2 space-y-4">
           <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
             <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-700 pb-4">
-              <div className="space-y-2">
-                <Label htmlFor="title" className="text-slate-300">Contract Title *</Label>
-                <Input
-                  id="title"
-                  type="text"
-                  className="bg-slate-700/50 border-slate-600 text-white text-lg font-semibold"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g., Website Development Agreement"
-                  required
-                />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="title" className="text-slate-300">Contract Title *</Label>
+                  <Input
+                    id="title"
+                    type="text"
+                    className="bg-slate-700/50 border-slate-600 text-white text-lg font-semibold"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g., Website Development Agreement"
+                    required
+                  />
+                </div>
+                
+                {/* Contract Type Selector */}
+                <div className="space-y-2">
+                  <Label className="text-slate-300">Contract Type</Label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContractType("contract");
+                        setData({ ...data, contractType: "contract" });
+                      }}
+                      className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                        contractType === "contract"
+                          ? "border-indigo-500 bg-indigo-600/20 text-white"
+                          : "border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      <FileText className="h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-semibold text-sm">Standard Contract</div>
+                        <div className="text-xs opacity-80">Client pays you</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContractType("proposal");
+                        setData({ ...data, contractType: "proposal" });
+                      }}
+                      className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                        contractType === "proposal"
+                          ? "border-indigo-500 bg-indigo-600/20 text-white"
+                          : "border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      <Handshake className="h-4 w-4" />
+                      <div className="text-left">
+                        <div className="font-semibold text-sm">Proposal</div>
+                        <div className="text-xs opacity-80">You offer to pay client</div>
+                      </div>
+                    </button>
+                  </div>
+                  {contractType === "proposal" && (
+                    <p className="text-xs text-indigo-300 flex items-center gap-1">
+                      <Info className="h-3 w-3" />
+                      This is a proposal where you're offering compensation to the client
+                    </p>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-4 space-y-4">
@@ -5799,31 +5901,51 @@ Client: _________________________ Date: _________`
 function Step4SetAmounts({
   depositAmount,
   totalAmount,
+  contractType = "contract",
   onSubmit,
   onBack,
 }: {
   depositAmount: string;
   totalAmount: string;
+  contractType?: "contract" | "proposal";
   onSubmit: (deposit: string, total: string) => void;
   onBack: () => void;
 }) {
   const [deposit, setDeposit] = useState(depositAmount);
   const [total, setTotal] = useState(totalAmount);
+  const isProposal = contractType === "proposal";
 
   return (
     <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm max-w-2xl mx-auto">
       <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-700">
         <CardTitle className="text-2xl font-bold text-white flex items-center gap-2">
           <DollarSign className="h-6 w-6 text-indigo-400" />
-          Set Payment Amounts
+          {isProposal ? "Set Compensation Amounts" : "Set Payment Amounts"}
         </CardTitle>
         <CardDescription className="text-slate-400 mt-1">
-          Enter deposit and total contract amounts
+          {isProposal 
+            ? "Enter the compensation you're offering to the client"
+            : "Enter deposit and total contract amounts"}
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-6">
+        {isProposal && (
+          <div className="p-4 bg-indigo-900/20 border border-indigo-700/50 rounded-lg">
+            <div className="flex items-start gap-3">
+              <Handshake className="h-5 w-5 text-indigo-400 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">Proposal Contract</p>
+                <p className="text-xs text-slate-300">
+                  You are offering compensation to the client. This is a proposal where you will pay them, not the other way around.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="space-y-2">
-          <Label htmlFor="deposit" className="text-slate-300">Deposit Amount ($)</Label>
+          <Label htmlFor="deposit" className="text-slate-300">
+            {isProposal ? "Initial Payment Amount ($)" : "Deposit Amount ($)"}
+          </Label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
             <Input
@@ -5838,12 +5960,14 @@ function Step4SetAmounts({
             />
           </div>
           <p className="text-xs text-slate-500">
-            Optional: Amount required upfront before work begins
+            {isProposal 
+              ? "Optional: Initial payment amount you'll pay upfront"
+              : "Optional: Amount required upfront before work begins"}
           </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="total" className="text-slate-300">
-            Total Amount ($) <span className="text-red-400">*</span>
+            {isProposal ? "Total Compensation Amount ($)" : "Total Amount ($)"} <span className="text-red-400">*</span>
           </Label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -5860,7 +5984,9 @@ function Step4SetAmounts({
             />
           </div>
           <p className="text-xs text-slate-500">
-            Total contract value
+            {isProposal 
+              ? "Total compensation you're offering to pay"
+              : "Total contract value"}
           </p>
         </div>
         {parseFloat(deposit) > 0 && parseFloat(total) > 0 && (
@@ -5901,13 +6027,503 @@ function Step4SetAmounts({
   );
 }
 
+function Step6Styling({
+  data,
+  branding,
+  setBranding,
+  onSubmit,
+  onBack,
+}: {
+  data: ContractData;
+  branding: any;
+  setBranding: (branding: any) => void;
+  onSubmit: () => void;
+  onBack: () => void;
+}) {
+  const [subscriptionTier, setSubscriptionTier] = useState<"free" | "starter" | "pro" | "premium">("free");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Fetch subscription tier
+    fetch("/api/account")
+      .then(res => res.json())
+      .then(result => {
+        if (result.company) {
+          setSubscriptionTier(result.company.subscriptionTier || "free");
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const hasCustomBranding = subscriptionTier === "pro" || subscriptionTier === "premium";
+  const hasBasicStyling = subscriptionTier === "starter" || hasCustomBranding;
+
+  // Complete style presets with all settings - one click applies everything
+  const tierPresets = {
+    free: [
+      { 
+        name: "Standard", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+    ],
+    starter: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+    pro: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Creative", 
+        icon: "🎨",
+        colors: { primary: "#7c3aed", secondary: "#8b5cf6", accent: "#a78bfa" }, 
+        font: "'Helvetica Neue', sans-serif",
+        headerStyle: "centered" as const,
+        borderStyle: "dashed" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+    premium: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Creative", 
+        icon: "🎨",
+        colors: { primary: "#7c3aed", secondary: "#8b5cf6", accent: "#a78bfa" }, 
+        font: "'Helvetica Neue', sans-serif",
+        headerStyle: "centered" as const,
+        borderStyle: "dashed" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+      { 
+        name: "Luxury", 
+        icon: "💎",
+        colors: { primary: "#92400e", secondary: "#d97706", accent: "#f59e0b" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+  };
+
+  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+
+  const applyPreset = (preset: any, index: number) => {
+    setSelectedPreset(index);
+    setBranding({
+      ...branding,
+      primaryColor: preset.colors.primary,
+      secondaryColor: preset.colors.secondary,
+      accentColor: preset.colors.accent || preset.colors.secondary,
+      fontFamily: preset.font,
+      headerStyle: preset.headerStyle,
+      borderStyle: preset.borderStyle,
+      showBorder: preset.borderStyle !== "none",
+    });
+  };
+
+  if (loading) {
+    return (
+      <Card className="border-2 border-slate-700">
+        <CardContent className="p-8 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-2 border-indigo-500/30 bg-slate-800/95">
+        <CardHeader className="bg-gradient-to-r from-indigo-900/20 to-purple-900/20 border-b border-slate-700">
+          <CardTitle className="text-2xl font-bold text-white flex items-center gap-2">
+            <FileType className="h-6 w-6 text-indigo-400" />
+            Customize Contract Style
+          </CardTitle>
+          <CardDescription className="text-slate-400 mt-1">
+            Choose how your contract will look on paper - colors, fonts, and layout
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 space-y-6">
+          {/* Tier Info */}
+          <div className={`p-4 rounded-lg border ${
+            subscriptionTier === "free" 
+              ? "bg-slate-700/30 border-slate-600" 
+              : subscriptionTier === "starter"
+              ? "bg-blue-900/20 border-blue-700/50"
+              : "bg-indigo-900/20 border-indigo-700/50"
+          }`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Current Plan: <span className="text-indigo-300 capitalize">{subscriptionTier}</span>
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {subscriptionTier === "free" 
+                    ? "Upgrade to Starter or Pro for more styling options"
+                    : subscriptionTier === "starter"
+                    ? "Upgrade to Pro for full custom branding (colors, logos, watermarks)"
+                    : "You have access to all styling features"}
+                </p>
+              </div>
+              {subscriptionTier !== "premium" && (
+                <Link href="/dashboard/subscription">
+                  <Button size="sm" variant="outline" className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/30">
+                    Upgrade Plan
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* Style Presets - Large Visual Cards */}
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-4">Choose Your Style (One Click)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tierPresets[subscriptionTier].map((preset, idx) => {
+                const isSelected = selectedPreset === idx;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => applyPreset(preset, idx)}
+                    className={`relative p-6 rounded-xl border-2 transition-all group text-left ${
+                      isSelected
+                        ? "border-indigo-500 bg-indigo-900/20 ring-4 ring-indigo-500/30"
+                        : "border-slate-700 bg-slate-800/50 hover:border-indigo-500/50 hover:bg-slate-700/50"
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="absolute top-3 right-3">
+                        <CheckCircle2 className="h-6 w-6 text-indigo-400" />
+                      </div>
+                    )}
+                    
+                    {/* Preview Card */}
+                    <div 
+                      className="mb-4 p-4 rounded-lg border-2 bg-white shadow-lg"
+                      style={{ 
+                        borderColor: preset.colors.primary,
+                        borderStyle: preset.borderStyle,
+                        fontFamily: preset.font,
+                      }}
+                    >
+                      <div 
+                        className="mb-3 pb-2 border-b-2"
+                        style={{ 
+                          borderColor: preset.colors.primary,
+                          textAlign: preset.headerStyle === "centered" ? "center" : preset.headerStyle,
+                        }}
+                      >
+                        <h4 
+                          className="text-lg font-bold mb-1"
+                          style={{ color: preset.colors.primary }}
+                        >
+                          {data.title || "Contract Title"}
+                        </h4>
+                        <p 
+                          className="text-xs"
+                          style={{ color: preset.colors.secondary }}
+                        >
+                          Professional Document
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="h-1 bg-slate-200 rounded"></div>
+                        <div className="h-1 bg-slate-200 rounded w-3/4"></div>
+                        <div className="h-1 bg-slate-200 rounded w-5/6"></div>
+                      </div>
+                    </div>
+
+                    {/* Style Info */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-2xl">{preset.icon}</span>
+                          <p className="text-base font-semibold text-white">
+                            {preset.name}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full border border-slate-600" 
+                            style={{ backgroundColor: preset.colors.primary }}
+                          />
+                          <div 
+                            className="w-3 h-3 rounded-full border border-slate-600" 
+                            style={{ backgroundColor: preset.colors.secondary }}
+                          />
+                          {preset.colors.accent && (
+                            <div 
+                              className="w-3 h-3 rounded-full border border-slate-600" 
+                              style={{ backgroundColor: preset.colors.accent }}
+                            />
+                          )}
+                          <span className="text-xs text-slate-400 ml-2" style={{ fontFamily: preset.font }}>
+                            {preset.font.split(",")[0].replace(/'/g, "")}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom Options (Pro+ only) - Collapsible */}
+          {hasCustomBranding && (
+            <details className="pt-4 border-t border-slate-700">
+              <summary className="cursor-pointer text-lg font-semibold text-white flex items-center gap-2 hover:text-indigo-300 transition-colors">
+                <Zap className="h-5 w-5 text-indigo-400" />
+                Advanced Customization (Optional)
+              </summary>
+              <div className="space-y-4 mt-4 pt-4 border-t border-slate-700">
+              
+              {/* Colors */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Primary Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.primaryColor}
+                      onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.primaryColor}
+                      onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Secondary Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.secondaryColor}
+                      onChange={(e) => setBranding({ ...branding, secondaryColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.secondaryColor}
+                      onChange={(e) => setBranding({ ...branding, secondaryColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Accent Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.accentColor}
+                      onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.accentColor}
+                      onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Font */}
+              <div>
+                <Label className="text-sm text-slate-300 mb-2 block">Font Family</Label>
+                <select
+                  value={branding.fontFamily}
+                  onChange={(e) => setBranding({ ...branding, fontFamily: e.target.value })}
+                  className="w-full h-10 rounded border border-slate-600 bg-slate-700/50 px-3 text-white"
+                >
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="'Times New Roman', serif">Times New Roman</option>
+                  <option value="Calibri, sans-serif">Calibri</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="'Helvetica Neue', sans-serif">Helvetica Neue</option>
+                </select>
+              </div>
+
+              {/* Layout */}
+              <div>
+                <Label className="text-sm text-slate-300 mb-2 block">Header Alignment</Label>
+                <div className="flex gap-2">
+                  {(["left", "centered", "right"] as const).map((align) => (
+                    <button
+                      key={align}
+                      onClick={() => setBranding({ ...branding, headerStyle: align })}
+                      className={`flex-1 py-2 rounded text-sm ${
+                        branding.headerStyle === align
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                      }`}
+                    >
+                      {align === "centered" ? "Center" : align.charAt(0).toUpperCase() + align.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              </div>
+            </details>
+          )}
+
+          {/* Selected Style Preview */}
+          {selectedPreset !== null && (
+            <div className="pt-4 border-t border-slate-700">
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-sm font-semibold text-white">Selected Style Preview</Label>
+                <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+                  Active
+                </Badge>
+              </div>
+              <div 
+                className="p-8 rounded-xl border-2 shadow-2xl bg-white"
+                style={{ 
+                  borderColor: branding.primaryColor,
+                  borderStyle: branding.borderStyle,
+                  fontFamily: branding.fontFamily,
+                }}
+              >
+                <div 
+                  className="mb-6 pb-4 border-b-2"
+                  style={{ 
+                    borderColor: branding.primaryColor,
+                    textAlign: branding.headerStyle === "centered" ? "center" : branding.headerStyle,
+                  }}
+                >
+                  <h2 
+                    className="text-2xl font-bold mb-2"
+                    style={{ color: branding.primaryColor }}
+                  >
+                    {data.title || "Contract Title"}
+                  </h2>
+                  <p 
+                    className="text-base"
+                    style={{ color: branding.secondaryColor }}
+                  >
+                    Professional Contract Document
+                  </p>
+                </div>
+                <div className="space-y-3 text-slate-700" style={{ fontFamily: branding.fontFamily }}>
+                  <p className="leading-relaxed">
+                    This is a preview of how your contract will appear when printed or viewed as a PDF. 
+                    All styling including colors, fonts, and layout will be applied automatically.
+                  </p>
+                  <div className="pt-4 border-t border-slate-200">
+                    <p className="text-sm text-slate-500">
+                      ✓ Colors applied • ✓ Font selected • ✓ Layout configured
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Navigation */}
+      <div className="flex justify-between">
+        <Button 
+          variant="outline" 
+          onClick={onBack}
+          className="border-slate-600 text-slate-300 hover:bg-slate-700"
+        >
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
+        <Button 
+          onClick={onSubmit}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white"
+        >
+          Continue to Review
+          <ChevronRight className="h-4 w-4 ml-2" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function Step5Preview({
   data,
+  setData,
   onSubmit,
   onBack,
   isLoading,
 }: {
   data: ContractData;
+  setData: (data: ContractData | ((prev: ContractData) => ContractData)) => void;
   onSubmit: () => void;
   onBack: () => void;
   isLoading: boolean;
@@ -5952,29 +6568,44 @@ function Step5Preview({
             </div>
           )}
           <div className="space-y-2">
-            <h3 className="font-semibold text-white">Compensation</h3>
+            <h3 className="font-semibold text-white">
+              {data.contractType === "proposal" ? "Compensation Offer" : "Compensation"}
+            </h3>
             {data.hasCompensation ? (
               <div className="space-y-2 text-slate-300">
                 <div className="p-3 bg-indigo-900/20 border border-indigo-700/50 rounded-lg">
                   <div className="flex items-center gap-2 mb-2">
                     <DollarSign className="h-4 w-4 text-indigo-400" />
-                    <span className="font-medium">Compensation Type:</span>
+                    <span className="font-medium">
+                      {data.contractType === "proposal" ? "Compensation Structure:" : "Compensation Type:"}
+                    </span>
                     <span className="text-indigo-300">
-                      {data.compensationType === "fixed_amount" ? "Fixed Amount" :
-                       data.compensationType === "hourly" ? "Hourly Rate" :
-                       data.compensationType === "milestone" ? "Milestone-Based" :
+                      {data.compensationType === "fixed_amount" 
+                        ? (data.contractType === "proposal" ? "Fixed Offer" : "Fixed Amount") :
+                       data.compensationType === "hourly" 
+                        ? (data.contractType === "proposal" ? "Hourly Rate Offer" : "Hourly Rate") :
+                       data.compensationType === "milestone" 
+                        ? (data.contractType === "proposal" ? "Milestone-Based Offer" : "Milestone-Based") :
                        data.compensationType === "other" ? "Other" : "No Compensation"}
                     </span>
                   </div>
                   {parseFloat(data.depositAmount || "0") > 0 && (
-                    <div className="text-sm">Deposit: <span className="font-semibold">${parseFloat(data.depositAmount).toFixed(2)}</span></div>
+                    <div className="text-sm">
+                      {data.contractType === "proposal" ? "Initial Payment:" : "Deposit:"} 
+                      <span className="font-semibold"> ${parseFloat(data.depositAmount).toFixed(2)}</span>
+                    </div>
                   )}
                   {parseFloat(data.totalAmount || "0") > 0 && (
-                    <div className="text-sm">Total: <span className="font-semibold">${parseFloat(data.totalAmount).toFixed(2)}</span></div>
+                    <div className="text-sm">
+                      {data.contractType === "proposal" ? "Total Compensation:" : "Total:"} 
+                      <span className="font-semibold"> ${parseFloat(data.totalAmount).toFixed(2)}</span>
+                    </div>
                   )}
                   {data.paymentTerms && (
                     <div className="mt-2 pt-2 border-t border-indigo-700/30">
-                      <p className="text-xs text-slate-400 mb-1">Payment Terms:</p>
+                      <p className="text-xs text-slate-400 mb-1">
+                        {data.contractType === "proposal" ? "Compensation Terms:" : "Payment Terms:"}
+                      </p>
                       <p className="text-sm whitespace-pre-wrap">{data.paymentTerms}</p>
                     </div>
                   )}
@@ -5982,10 +6613,72 @@ function Step5Preview({
               </div>
             ) : (
               <div className="p-3 bg-slate-700/30 border border-slate-600 rounded-lg">
-                <p className="text-sm text-slate-400">No compensation specified for this contract</p>
+                <p className="text-sm text-slate-400">
+                  {data.contractType === "proposal" 
+                    ? "No compensation specified for this proposal" 
+                    : "No compensation specified for this contract"}
+                </p>
               </div>
             )}
           </div>
+          
+          {/* Password Protection Section */}
+          <div className="space-y-4 pt-4 border-t border-slate-700">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Lock className="h-5 w-5 text-indigo-400" />
+                <div>
+                  <Label htmlFor="usePassword" className="text-white font-semibold cursor-pointer">
+                    Password Protection
+                  </Label>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Require a password to view and sign this contract
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                {data.usePassword ? (
+                  <ToggleRight
+                    className="h-6 w-6 text-indigo-400 cursor-pointer"
+                    onClick={() => setData({ ...data, usePassword: false, password: undefined, confirmPassword: undefined })}
+                  />
+                ) : (
+                  <ToggleLeft
+                    className="h-6 w-6 text-slate-500 cursor-pointer"
+                    onClick={() => setData({ ...data, usePassword: true, password: "", confirmPassword: "" })}
+                  />
+                )}
+              </div>
+            </div>
+            
+            {data.usePassword && (
+              <div className="pl-8 space-y-3 pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-slate-300">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter password (min 4 characters)"
+                    value={data.password || ""}
+                    onChange={(e) => setData({ ...data, password: e.target.value })}
+                    className="bg-slate-700 border-slate-600 text-white"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword" className="text-slate-300">Confirm Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="Confirm password"
+                    value={data.confirmPassword || ""}
+                    onChange={(e) => setData({ ...data, confirmPassword: e.target.value })}
+                    className="bg-slate-700 border-slate-600 text-white"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-between pt-4 border-t border-slate-700">
             <Button 
               variant="outline" 
@@ -6033,24 +6726,28 @@ function Step5Preview({
             </div>
             {data.hasCompensation && (
               <div className="mt-6 p-4 bg-slate-100 rounded-lg">
-                <h3 className="font-semibold text-slate-900 mb-2">Payment & Compensation</h3>
+                <h3 className="font-semibold text-slate-900 mb-2">
+                  {data.contractType === "proposal" ? "Compensation Offer" : "Payment & Compensation"}
+                </h3>
                 {(parseFloat(data.depositAmount) > 0 || parseFloat(data.totalAmount) > 0) && (
                   <>
                     {parseFloat(data.depositAmount) > 0 && (
                       <p className="text-sm text-slate-700 mb-1">
-                        Deposit: ${parseFloat(data.depositAmount).toFixed(2)}
+                        {data.contractType === "proposal" ? "Initial Payment:" : "Deposit:"} ${parseFloat(data.depositAmount).toFixed(2)}
                       </p>
                     )}
                     {parseFloat(data.totalAmount) > 0 && (
                       <p className="text-sm text-slate-700 mb-2">
-                        Total Amount: ${parseFloat(data.totalAmount).toFixed(2)}
+                        {data.contractType === "proposal" ? "Total Compensation:" : "Total Amount:"} ${parseFloat(data.totalAmount).toFixed(2)}
                       </p>
                     )}
                   </>
                 )}
                 {data.paymentTerms && (
                   <div className="mt-2 pt-2 border-t border-slate-300">
-                    <p className="text-xs font-medium text-slate-600 mb-1">Additional Payment Terms:</p>
+                    <p className="text-xs font-medium text-slate-600 mb-1">
+                      {data.contractType === "proposal" ? "Compensation Terms:" : "Additional Payment Terms:"}
+                    </p>
                     <p className="text-sm text-slate-700 whitespace-pre-wrap">{data.paymentTerms}</p>
                   </div>
                 )}
@@ -6058,7 +6755,11 @@ function Step5Preview({
             )}
             {!data.hasCompensation && (
               <div className="mt-6 p-4 bg-slate-100 rounded-lg border border-slate-300">
-                <p className="text-sm text-slate-600 italic">This contract does not include any payment or compensation terms.</p>
+                <p className="text-sm text-slate-600 italic">
+                  {data.contractType === "proposal" 
+                    ? "This proposal does not include any compensation terms." 
+                    : "This contract does not include any payment or compensation terms."}
+                </p>
               </div>
             )}
           </div>

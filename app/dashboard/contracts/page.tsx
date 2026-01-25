@@ -59,6 +59,7 @@ export default async function ContractsPage({
     paid: contracts.filter((c) => c.status === "paid").length,
     completed: contracts.filter((c) => c.status === "completed").length,
     draft: contracts.filter((c) => c.status === "draft").length,
+    ready: contracts.filter((c) => c.status === "ready").length,
     totalRevenue: contracts
       .filter((c) => ["paid", "completed"].includes(c.status))
       .reduce((sum, c) => sum + c.totalAmount, 0),

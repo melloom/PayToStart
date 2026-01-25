@@ -3,6 +3,8 @@ import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { getContractLinkEmail } from "@/lib/email/templates";
+import { hashPassword } from "@/lib/security/tokens";
+import { log } from "@/lib/logger";
 
 export async function POST(
   request: Request,
@@ -26,7 +28,7 @@ export async function POST(
       );
     }
 
-    const { email } = await request.json();
+    const { email, password } = await request.json();
     
     // Get client to get email if not provided
     let clientEmailToUse = email;
@@ -36,6 +38,18 @@ export async function POST(
         return NextResponse.json({ message: "Client not found" }, { status: 404 });
       }
       clientEmailToUse = client.email;
+    }
+
+    // Hash password if provided
+    let passwordHash: string | undefined = undefined;
+    if (password && password.trim()) {
+      if (password.length < 4) {
+        return NextResponse.json(
+          { message: "Password must be at least 4 characters" },
+          { status: 400 }
+        );
+      }
+      passwordHash = hashPassword(password.trim());
     }
 
     const client = await db.clients.findById(contract.clientId);
@@ -65,9 +79,43 @@ export async function POST(
         subject,
         html,
       });
-    } catch (emailError) {
+
+      // Update contract status from "draft" or "ready" to "sent" when sending
+      // Also update password hash if provided
+      const updateData: any = {
+        status: "sent",
+      };
+      if (passwordHash !== undefined) {
+        updateData.passwordHash = passwordHash;
+      }
+      
+      if (contract.status === "draft" || contract.status === "ready") {
+        await db.contracts.update(contract.id, updateData);
+
+        // Log "sent" event
+        await db.contractEvents.logEvent({
+          contractId: contract.id,
+          eventType: "sent",
+          actorType: "contractor",
+          actorId: contractor.id,
+        });
+
+        log.info({ 
+          contractId: contract.id,
+          contractorId: contractor.id,
+          clientEmail: clientEmailToUse,
+        }, "Contract sent to client");
+      }
+    } catch (emailError: any) {
       console.error("Error sending email:", emailError);
-      // Don't fail if email fails - still return success as the link can be shared manually
+      // Return error so user knows email failed
+      return NextResponse.json(
+        { 
+          message: emailError.message || "Failed to send email. Please check your email configuration.",
+          error: "EMAIL_SEND_FAILED"
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({

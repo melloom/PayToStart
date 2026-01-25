@@ -2,14 +2,19 @@ import { redirect } from "next/navigation";
 import { getCurrentContractor } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSignature } from "@/lib/signature";
+import { getEffectiveTier } from "@/lib/subscriptions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Mail, FileText, X, Send, Download, Clock, CheckCircle, DollarSign, FileCheck } from "lucide-react";
+import { Mail, FileText, X, Send, Download, Clock, CheckCircle, DollarSign, FileCheck, Eye, MessageSquare, Handshake } from "lucide-react";
 import { format } from "date-fns";
 import { CopyButton } from "@/components/copy-button";
 import ContractActions from "./contract-actions";
+import { ContractPreview } from "@/components/contract-preview";
+import { ContractStatusPoller } from "@/components/contract-status-poller";
+import { UpdateStyleButton } from "@/app/(dashboard)/contracts/[id]/update-style-button";
+import { PasswordToggle } from "./password-toggle";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -66,14 +71,39 @@ export default async function ContractDetailPage({
     redirect("/dashboard");
   }
 
-  const client = await db.clients.findById(contract.clientId);
-  const signature = await getSignature(contract.id);
-  const payments = await db.payments.findByContractId(contract.id);
+  // Fetch data in parallel for better performance - with error handling
+  const [client, signature, payments, effectiveTier, company] = await Promise.all([
+    db.clients.findById(contract.clientId).catch(() => null),
+    getSignature(contract.id).catch(() => null),
+    db.payments.findByContractId(contract.id).catch(() => []),
+    getEffectiveTier(contractor.companyId),
+    db.companies.findById(contractor.companyId).catch(() => null),
+  ]);
+  
   const signingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/sign/${contract.signingToken}`;
+  
+  // Get contractor info for preview
+  const contractorInfo = {
+    name: contractor.name,
+    email: contractor.email,
+    companyName: contractor.companyName || undefined,
+    companyLogo: null, // Company logo not currently stored in Company table
+    companyAddress: null, // Company address not currently stored in Company table
+  };
+
+  // Extract branding from contract fieldValues
+  const currentBranding = contract.fieldValues && typeof contract.fieldValues === 'object' && '_branding' in contract.fieldValues
+    ? (contract.fieldValues._branding as any)
+    : undefined;
+
+  // Check if user can update style (starter+ tier and is contract creator)
+  const canUpdateStyle = (effectiveTier === "starter" || effectiveTier === "pro" || effectiveTier === "premium") 
+    && contract.contractorId === contractor.id;
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, "default" | "secondary" | "outline"> = {
       draft: "outline",
+      ready: "default",
       sent: "secondary",
       signed: "default",
       paid: "default",
@@ -81,9 +111,19 @@ export default async function ContractDetailPage({
       cancelled: "outline",
     };
 
+    const displayText: Record<string, string> = {
+      draft: "Draft",
+      ready: "Ready to Send",
+      sent: "Pending",
+      signed: "Signed",
+      paid: "Paid",
+      completed: "Completed",
+      cancelled: "Cancelled",
+    };
+
     return (
       <Badge variant={variants[status] || "outline"}>
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {displayText[status] || status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     );
   };
@@ -99,11 +139,18 @@ export default async function ContractDetailPage({
     description: "Contract was created",
   });
 
-  if (contract.status !== "draft" && contract.status !== "cancelled") {
+  // Only show "Contract Sent" if status is "sent" AND the contract was actually sent
+  // Newly created contracts often have status "sent" but haven't been emailed yet
+  // Only show if updatedAt is significantly different from createdAt (5+ minutes)
+  // This indicates the contract was actually sent, not just created
+  const timeDifference = contract.updatedAt.getTime() - contract.createdAt.getTime();
+  const wasActuallySent = contract.status === "sent" && timeDifference > 300000; // More than 5 minutes difference
+  
+  if (wasActuallySent) {
     timelineEvents.push({
       type: "sent",
       title: "Contract Sent",
-      date: contract.updatedAt >= contract.createdAt ? contract.updatedAt : contract.createdAt,
+      date: contract.updatedAt,
       icon: Send,
       description: "Contract was sent to client",
     });
@@ -156,10 +203,14 @@ export default async function ContractDetailPage({
   timelineEvents.sort((a, b) => a.date.getTime() - b.date.getTime());
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full" style={{ maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      {/* Real-time status poller for live updates */}
+      {contract.status === "sent" && (
+        <ContractStatusPoller contractId={contract.id} />
+      )}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">{contract.title}</h1>
-        <div className="flex items-center space-x-4">
+        <h1 className="text-3xl font-bold mb-2 break-words">{contract.title}</h1>
+        <div className="flex items-center space-x-4 flex-wrap gap-2">
           {getStatusBadge(contract.status)}
           <span className="text-sm text-muted-foreground">
             Created {format(contract.createdAt, "MMM d, yyyy 'at' h:mm a")}
@@ -167,40 +218,55 @@ export default async function ContractDetailPage({
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3 mb-6">
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Contract Content</CardTitle>
+      <div className="grid gap-6 lg:grid-cols-3 mb-6 w-full" style={{ maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
+        <div className="lg:col-span-2 space-y-6" style={{ minWidth: 0, maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
+          {/* Contract Preview Section */}
+          <Card className="shadow-lg w-full overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 border-b">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <Eye className="h-5 w-5 text-blue-600" />
+                  Contract Preview
+                </CardTitle>
+                <Badge variant="outline" className="text-xs bg-white dark:bg-slate-800">
+                  How it will look on paper
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="prose max-w-none whitespace-pre-wrap">
-                {contract.content}
+            <CardContent className="p-0 w-full overflow-hidden">
+              <div className="border-2 border-gray-200 dark:border-slate-700 rounded-b-lg overflow-hidden bg-white dark:bg-slate-950 p-6 max-h-[800px] overflow-y-auto overflow-x-hidden custom-scrollbar w-full">
+                <div className="w-full min-w-0">
+                  <ContractPreview
+                    contract={contract}
+                    client={client || { name: "Client", email: "" }}
+                    contractor={contractorInfo}
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Timeline</CardTitle>
+          <Card className="shadow-lg w-full overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 border-b">
+              <CardTitle className="text-xl">Timeline</CardTitle>
               <CardDescription>Contract activity timeline</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-4 w-full">
                 {timelineEvents.map((event, index) => {
                   const Icon = event.icon;
                   const isLast = index === timelineEvents.length - 1;
                   return (
-                    <div key={index} className="flex gap-4">
-                      <div className="flex flex-col items-center">
+                    <div key={index} className="flex gap-4 w-full min-w-0">
+                      <div className="flex flex-col items-center flex-shrink-0">
                         <div className={`rounded-full p-2 ${event.type === "created" ? "bg-blue-100 text-blue-600" : event.type === "signed" || event.type === "completed" ? "bg-green-100 text-green-600" : event.type === "paid" ? "bg-yellow-100 text-yellow-600" : event.type === "cancelled" ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"}`}>
                           <Icon className="h-4 w-4" />
                         </div>
                         {!isLast && <div className="w-0.5 h-full bg-gray-200 my-2" />}
                       </div>
-                      <div className="flex-1 pb-4">
-                        <div className="font-medium">{event.title}</div>
-                        <div className="text-sm text-muted-foreground">{event.description}</div>
+                      <div className="flex-1 pb-4 min-w-0">
+                        <div className="font-medium break-words">{event.title}</div>
+                        <div className="text-sm text-muted-foreground break-words">{event.description}</div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {format(event.date, "MMM d, yyyy 'at' h:mm a")}
                         </div>
@@ -213,36 +279,49 @@ export default async function ContractDetailPage({
           </Card>
         </div>
 
-        <div className="space-y-6">
-          <Card>
+        <div className="space-y-6 min-w-0 w-full">
+          <Card className="w-full overflow-hidden">
             <CardHeader>
-              <CardTitle>Client Information</CardTitle>
+              <CardTitle className="break-words">Client Information</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                <p className="font-medium">{client?.name || "Unknown"}</p>
-                <p className="text-sm text-muted-foreground">{client?.email}</p>
+              <div className="space-y-2 break-words">
+                <p className="font-medium break-words">{client?.name || "Unknown"}</p>
+                <p className="text-sm text-muted-foreground break-all">{client?.email}</p>
                 {client?.phone && (
-                  <p className="text-sm text-muted-foreground">{client.phone}</p>
+                  <p className="text-sm text-muted-foreground break-all">{client.phone}</p>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Financial Details</CardTitle>
+          <Card className="shadow-lg w-full overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 border-b">
+              <CardTitle className="text-xl break-words">Financial Details</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total Amount:</span>
-                  <span className="font-semibold">${contract.totalAmount.toFixed(2)}</span>
+                {/* Show contract type badge */}
+                {contract.fieldValues?.contractType === "proposal" && (
+                  <div className="mb-2">
+                    <Badge variant="outline" className="border-indigo-600 text-indigo-300 bg-indigo-900/20">
+                      <Handshake className="h-3 w-3 mr-1" />
+                      Proposal Contract
+                    </Badge>
+                  </div>
+                )}
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-muted-foreground">
+                    {contract.fieldValues?.contractType === "proposal" ? "Total Compensation:" : "Total Amount:"}
+                  </span>
+                  <span className="font-semibold whitespace-nowrap">${contract.totalAmount.toFixed(2)}</span>
                 </div>
                 {contract.depositAmount > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Deposit:</span>
-                    <span className="font-semibold">${contract.depositAmount.toFixed(2)}</span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-muted-foreground">
+                      {contract.fieldValues?.contractType === "proposal" ? "Initial Payment:" : "Deposit:"}
+                    </span>
+                    <span className="font-semibold whitespace-nowrap">${contract.depositAmount.toFixed(2)}</span>
                   </div>
                 )}
               </div>
@@ -250,25 +329,27 @@ export default async function ContractDetailPage({
           </Card>
 
           {contract.status !== "cancelled" && contract.status !== "completed" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Actions</CardTitle>
+            <Card className="shadow-lg w-full overflow-hidden">
+              <CardHeader className="bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 border-b">
+                <CardTitle className="text-xl">Actions</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-2 w-full">
                 {contract.status === "sent" && (
                   <>
-                    <div className="flex items-center space-x-2 mb-4">
+                    <div className="flex items-center space-x-2 mb-4 w-full min-w-0">
                       <Input
                         value={signingUrl}
                         readOnly
-                        className="flex-1 text-sm"
+                        className="flex-1 text-sm min-w-0"
                       />
                       <CopyButton value={signingUrl} />
                     </div>
-                    <ContractActions contractId={contract.id} clientEmail={client?.email || ""} signingUrl={signingUrl} />
+                    <div className="w-full">
+                      <ContractActions contractId={contract.id} clientEmail={client?.email || ""} signingUrl={signingUrl} />
+                    </div>
                   </>
                 )}
-                {(contract.status === "draft" || contract.status === "sent") && (
+                {(contract.status === "draft" || contract.status === "ready" || contract.status === "sent") && (
                   <form action={`/api/contracts/${contract.id}/void`} method="POST" className="w-full">
                     <Button
                       type="submit"
@@ -280,19 +361,60 @@ export default async function ContractDetailPage({
                     </Button>
                   </form>
                 )}
+                {contract.status === "sent" && client?.email && (
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <a href={`mailto:${client.email}?subject=Contract Signing&body=Please sign the contract at: ${signingUrl}`}>
+                      <Mail className="h-4 w-4 mr-2" />
+                      Email Client
+                    </a>
+                  </Button>
+                )}
+                <div className="w-full pt-2 mt-2">
+                  <UpdateStyleButton
+                    contractId={contract.id}
+                    currentBranding={currentBranding}
+                    contractTitle={contract.title}
+                    effectiveTier={effectiveTier}
+                  />
+                  <PasswordToggle
+                    contractId={contract.id}
+                    hasPassword={!!contract.passwordHash}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}
 
           {contract.pdfUrl && (
-            <Card>
-              <CardContent className="pt-6">
-                <Button asChild className="w-full">
+            <Card className="border-2 border-blue-100 shadow-lg w-full overflow-hidden">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold text-gray-900 break-words">Download Contract</CardTitle>
+                <CardDescription className="text-sm text-gray-600">
+                  Get a professional PDF copy of your contract
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Button 
+                  asChild 
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-200 font-semibold h-11"
+                >
                   <a href={contract.pdfUrl} target="_blank" rel="noopener noreferrer">
-                    <Download className="h-4 w-4 mr-2" />
+                    <Download className="h-5 w-5 mr-2" />
                     Download PDF
                   </a>
                 </Button>
+                {canUpdateStyle && (
+                  <UpdateStyleButton
+                    contractId={contract.id}
+                    currentBranding={currentBranding}
+                    contractTitle={contract.title}
+                    effectiveTier={effectiveTier}
+                  />
+                )}
               </CardContent>
             </Card>
           )}
@@ -301,4 +423,3 @@ export default async function ContractDetailPage({
     </div>
   );
 }
-

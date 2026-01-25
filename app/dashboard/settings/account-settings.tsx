@@ -104,12 +104,21 @@ export default function AccountSettings({
     const loadPreferences = async () => {
       try {
         const response = await fetch("/api/account/notifications");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         if (data.success && data.preferences) {
           setNotificationPrefs(data.preferences);
         }
       } catch (error) {
-        console.error("Error loading notification preferences:", error);
+        // Only log if it's not a network error (which might be expected in some cases)
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          // Network error - might be offline or server issue
+          console.warn("Network error loading notification preferences - this may be expected if offline");
+        } else {
+          console.error("Error loading notification preferences:", error);
+        }
       } finally {
         setPrefsLoaded(true);
       }
@@ -126,13 +135,22 @@ export default function AccountSettings({
       setIsLoadingPaymentMethods(true);
       try {
         const response = await fetch("/api/subscriptions/payment-methods");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
-        if (response.ok) {
+        if (data.paymentMethods) {
           setPaymentMethods(data.paymentMethods || []);
           setDefaultPaymentMethod(data.defaultPaymentMethod);
         }
       } catch (error) {
-        console.error("Error loading payment methods:", error);
+        // Only log if it's not a network error (which might be expected in some cases)
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          // Network error - might be offline or server issue
+          console.warn("Network error loading payment methods - this may be expected if offline");
+        } else {
+          console.error("Error loading payment methods:", error);
+        }
       } finally {
         setIsLoadingPaymentMethods(false);
       }
@@ -146,12 +164,21 @@ export default function AccountSettings({
       setIsLoadingProviders(true);
       try {
         const response = await fetch("/api/payment-providers");
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         if (data.providers) {
           setPaymentProviders(data.providers || []);
         }
       } catch (error) {
-        console.error("Error loading payment providers:", error);
+        // Only log if it's not a network error (which might be expected in some cases)
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          // Network error - might be offline or server issue
+          console.warn("Network error loading payment providers - this may be expected if offline");
+        } else {
+          console.error("Error loading payment providers:", error);
+        }
       } finally {
         setIsLoadingProviders(false);
       }

@@ -86,3 +86,36 @@ export function getRateLimitConfig() {
     maxAttempts: MAX_ATTEMPTS_PER_WINDOW,
   };
 }
+
+/**
+ * Hash a contract password using SHA256 + secret
+ * This is what we store in the database
+ */
+export function hashPassword(password: string): string {
+  const hash = createHash("sha256");
+  hash.update(password + TOKEN_SECRET);
+  return hash.digest("hex");
+}
+
+/**
+ * Verify a password against a stored hash
+ * Uses timing-safe comparison to prevent timing attacks
+ */
+export function verifyPassword(password: string, storedHash: string): boolean {
+  const computedHash = hashPassword(password);
+  
+  // Convert hex strings to buffers for timing-safe comparison
+  const computedBuffer = Buffer.from(computedHash, "hex");
+  const storedBuffer = Buffer.from(storedHash, "hex");
+  
+  // Timing-safe comparison to prevent timing attacks
+  if (computedBuffer.length !== storedBuffer.length) {
+    return false;
+  }
+  
+  try {
+    return timingSafeEqual(computedBuffer, storedBuffer);
+  } catch {
+    return false;
+  }
+}

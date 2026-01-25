@@ -36,18 +36,19 @@ NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY=pk_test_your_test_publishable_key_here
 STRIPE_TEST_WEBHOOK_SECRET=whsec_your_test_webhook_secret_here
 
 # ============================================
-# EMAIL CONFIGURATION (Gmail SMTP)
+# EMAIL CONFIGURATION (Hostinger SMTP)
 # ============================================
-GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=your_16_character_gmail_app_password
-SMTP_FROM=your-email@gmail.com
+SMTP_HOST=smtp.hostinger.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@yourdomain.com
+SMTP_PASSWORD=your_email_password_here
+SMTP_FROM=your-email@yourdomain.com
 
-# OR use generic SMTP (if not using Gmail):
-# SMTP_USER=your-email@domain.com
-# SMTP_PASSWORD=your_smtp_password
-# SMTP_HOST=smtp.gmail.com
-# SMTP_PORT=587
-# SMTP_SECURE=false
+# OR use Gmail SMTP (alternative):
+# GMAIL_USER=your-email@gmail.com
+# GMAIL_APP_PASSWORD=your_16_character_gmail_app_password
+# SMTP_FROM=your-email@gmail.com
 
 # ============================================
 # OPTIONAL: CRON JOBS

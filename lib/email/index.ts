@@ -4,7 +4,8 @@ import nodemailer from "nodemailer";
 
 // Create reusable transporter for SMTP
 const createTransporter = () => {
-  // Check for SMTP credentials (support both Gmail and generic SMTP)
+  // Check for SMTP credentials (support Gmail, Hostinger, and generic SMTP)
+  // Priority: SMTP_USER > GMAIL_USER (for backwards compatibility)
   const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
   const smtpPassword = process.env.SMTP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
   
@@ -13,7 +14,9 @@ const createTransporter = () => {
     return null;
   }
 
-  // Default to Gmail if no SMTP_HOST is specified
+  // SMTP Host configuration
+  // Default to Gmail if no SMTP_HOST is specified (for backwards compatibility)
+  // For Hostinger, set SMTP_HOST=smtp.hostinger.com
   const smtpHost = process.env.SMTP_HOST || "smtp.gmail.com";
   const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
   const smtpSecure = process.env.SMTP_SECURE === "true" || smtpPort === 465;
@@ -59,7 +62,8 @@ export async function sendEmail(options: EmailOptions) {
 
   try {
     const mailOptions = {
-      from: options.from || process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || "contracts@yourapp.com",
+      // From address priority: options.from > SMTP_FROM > SMTP_USER > GMAIL_USER > default
+      from: options.from || process.env.SMTP_FROM || process.env.SMTP_USER || process.env.GMAIL_USER || "noreply@yourapp.com",
       to: options.to,
       subject: options.subject,
       html: options.html,

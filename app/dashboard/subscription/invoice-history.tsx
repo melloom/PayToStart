@@ -35,20 +35,27 @@ export default function InvoiceHistory({ customerId }: InvoiceHistoryProps) {
     setIsLoadingInvoices(true);
     try {
       const response = await fetch("/api/subscriptions/invoices");
-      const data = await response.json();
-
+      
       if (!response.ok) {
-        throw new Error(data.message || "Failed to load invoices");
+        const data = await response.json();
+        throw new Error(data.message || `HTTP error! status: ${response.status}`);
       }
 
+      const data = await response.json();
       setInvoices(data.invoices || []);
     } catch (error: any) {
-      console.error("Error loading invoices:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load invoice history.",
-        variant: "destructive",
-      });
+      // Only show toast for non-network errors
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        // Network error - might be offline or server issue
+        console.warn("Network error loading invoices - this may be expected if offline");
+      } else {
+        console.error("Error loading invoices:", error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to load invoice history.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoadingInvoices(false);
     }

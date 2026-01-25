@@ -8023,32 +8023,34 @@ function Step5Preview({
             />
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowFullScreenEditor(false);
-                setEditedContent(data.content);
-              }}
-              className="border-slate-600 text-slate-300"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                setData((prev: ContractData) => ({
-                  ...prev,
-                  content: editedContent,
-                }));
-                setShowFullScreenEditor(false);
-                toast({
-                  title: "✅ Contract Updated",
-                  description: "Your contract content has been saved.",
-                });
-              }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            >
-              Save Changes
-            </Button>
+            <div className="flex justify-end gap-3 w-full">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowFullScreenEditor(false);
+                  setEditedContent(data.content);
+                }}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setData((prev: ContractData) => ({
+                    ...prev,
+                    content: editedContent,
+                  }));
+                  setShowFullScreenEditor(false);
+                  toast({
+                    title: "✅ Contract Updated",
+                    description: "Your contract content has been saved.",
+                  });
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                Save Changes
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

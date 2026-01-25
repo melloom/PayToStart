@@ -56,6 +56,11 @@ export async function generateContractPDF(
     }
   }
 
+  // Extract branding from contract fieldValues
+  const branding = contract.fieldValues && typeof contract.fieldValues === 'object' && '_branding' in contract.fieldValues
+    ? contract.fieldValues._branding
+    : undefined;
+
   // Render PDF using React component
   const pdfDocument = React.createElement(ContractPDF, {
     contract,
@@ -68,9 +73,11 @@ export async function generateContractPDF(
         }
       : null,
     payment: payment || null,
+    branding: branding,
   });
 
-  // Render to buffer
+  // Render to buffer with high quality settings
+  // @react-pdf/renderer uses pdfkit under the hood which produces high-quality PDFs
   const buffer = await renderToBuffer(pdfDocument as any);
 
   return buffer;

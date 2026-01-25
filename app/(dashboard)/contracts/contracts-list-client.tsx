@@ -28,7 +28,7 @@ interface ContractWithClient extends Contract {
   clientName: string;
 }
 
-type FilterType = "all" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
+type FilterType = "all" | "ready" | "sent" | "signed" | "paid" | "completed" | "draft" | "cancelled" | "drafts";
 
 export default function ContractsListClient({
   contracts,
@@ -47,7 +47,13 @@ export default function ContractsListClient({
     
     // Apply status filter
     if (filter !== "all" && filter !== "drafts") {
-      filtered = filtered.filter((c) => c.status === filter);
+      if (filter === "draft") {
+        // Filter for draft contracts (status: "draft")
+        filtered = filtered.filter((c) => c.status === "draft");
+      } else {
+        // Filter for other statuses (including "ready")
+        filtered = filtered.filter((c) => c.status === filter);
+      }
     }
     
     // Apply search query
@@ -91,7 +97,17 @@ export default function ContractsListClient({
         className: "bg-slate-700/50 text-slate-300 border-slate-600",
         icon: <FileText className="h-3 w-3" />
       },
+      ready: { 
+        variant: "default", 
+        className: "bg-blue-900/50 text-blue-300 border-blue-700",
+        icon: <CheckCircle2 className="h-3 w-3" />
+      },
       sent: { 
+        variant: "secondary", 
+        className: "bg-amber-900/50 text-amber-300 border-amber-700",
+        icon: <Clock className="h-3 w-3" />
+      },
+      pending: { 
         variant: "secondary", 
         className: "bg-amber-900/50 text-amber-300 border-amber-700",
         icon: <Clock className="h-3 w-3" />
@@ -120,22 +136,26 @@ export default function ContractsListClient({
 
     const config = statusConfig[status] || { variant: "outline", className: "", icon: null };
 
+    // Map "sent" status to "Pending" for better UX
+    const displayStatus = status === "sent" ? "Pending" : status.charAt(0).toUpperCase() + status.slice(1);
+    
     return (
       <Badge variant={config.variant} className={`${config.className} flex items-center gap-1`}>
         {config.icon}
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {displayStatus}
       </Badge>
     );
   };
 
   const filters: { value: FilterType; label: string; icon: React.ReactNode }[] = [
     { value: "all", label: "All", icon: <FileText className="h-4 w-4" /> },
-    { value: "drafts", label: "Drafts", icon: <PenTool className="h-4 w-4" /> },
-    { value: "sent", label: "Sent", icon: <Clock className="h-4 w-4" /> },
+    { value: "draft", label: "Draft Contracts", icon: <FileText className="h-4 w-4" /> },
+    { value: "ready", label: "Ready to Send", icon: <CheckCircle2 className="h-4 w-4" /> },
+    { value: "drafts", label: "Draft Templates", icon: <PenTool className="h-4 w-4" /> },
+    { value: "sent", label: "Pending", icon: <Clock className="h-4 w-4" /> },
     { value: "signed", label: "Signed", icon: <CheckCircle2 className="h-4 w-4" /> },
     { value: "paid", label: "Paid", icon: <DollarSign className="h-4 w-4" /> },
     { value: "completed", label: "Completed", icon: <CheckCircle2 className="h-4 w-4" /> },
-    { value: "draft", label: "Draft Contracts", icon: <FileText className="h-4 w-4" /> },
     { value: "cancelled", label: "Cancelled", icon: <X className="h-4 w-4" /> },
   ];
 
@@ -151,10 +171,12 @@ export default function ContractsListClient({
               </div>
               <Badge variant="outline" className="bg-slate-700/50 text-slate-200 border-slate-600/50">
                 {filter === "drafts" 
-                  ? `${filteredDrafts.length} ${filteredDrafts.length === 1 ? "draft" : "drafts"}`
+                  ? `${filteredDrafts.length} ${filteredDrafts.length === 1 ? "template" : "templates"}`
+                  : filter === "draft"
+                  ? `${filteredContracts.length} ${filteredContracts.length === 1 ? "draft contract" : "draft contracts"}`
                   : `${filteredContracts.length} ${filteredContracts.length === 1 ? "contract" : "contracts"}`}
                 {filter === "all" && drafts.length > 0 && (
-                  <span className="ml-2 text-amber-400">+ {drafts.length} drafts</span>
+                  <span className="ml-2 text-amber-400">+ {drafts.length} templates</span>
                 )}
               </Badge>
             </div>
