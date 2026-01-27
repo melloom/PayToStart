@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { 
   ChevronRight, 
@@ -95,7 +96,7 @@ import {
 import type { ContractTemplate } from "@/lib/types";
 import type { Client } from "@/lib/types";
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface ContractData {
   templateId?: string;
@@ -112,6 +113,7 @@ interface ContractData {
   totalAmount: string;
   title: string;
   content: string;
+  contractType?: "contract" | "proposal";
   hasCompensation?: boolean;
   compensationType?: "no_compensation" | "fixed_amount" | "hourly" | "milestone" | "other";
   paymentTerms?: string;
@@ -177,12 +179,46 @@ export default function NewContractPage() {
     totalAmount: "0",
     title: "",
     content: "",
+    contractType: "contract",
     hasCompensation: false,
     compensationType: "no_compensation",
   });
 
   const [hasAIAccess, setHasAIAccess] = useState<boolean | null>(null);
   const [hasBrandingAccess, setHasBrandingAccess] = useState<boolean | null>(null);
+  const [branding, setBranding] = useState({
+    // Logo settings
+    logo: "",
+    showLogo: true,
+    logoPosition: "header" as "header" | "watermark" | "footer" | "corner",
+    logoSize: "medium" as "small" | "medium" | "large",
+    logoOpacity: 100,
+    // Company info
+    companyName: "",
+    showCompanyName: true,
+    companyNamePosition: "header" as "header" | "footer" | "both",
+    // Colors
+    primaryColor: "#6366f1",
+    secondaryColor: "#8b5cf6",
+    accentColor: "#10b981",
+    // Typography
+    fontFamily: "Georgia, serif",
+    fontSize: "normal" as "small" | "normal" | "large",
+    // Layout
+    headerStyle: "centered" as "centered" | "left" | "right",
+    showBorder: true,
+    borderStyle: "solid" as "solid" | "double" | "dashed" | "none",
+    borderColor: "#e2e8f0",
+    // Watermark
+    showWatermark: false,
+    watermarkText: "DRAFT",
+    // Footer
+    showFooter: true,
+  });
+  
+  // Use branding from props
+  const currentBranding = branding;
+  const updateBranding = setBranding;
 
   // Get draftId from URL search params - check immediately on mount (client-side only)
   useEffect(() => {
@@ -209,8 +245,9 @@ export default function NewContractPage() {
   }, [searchParams, draftIdFromUrl]);
 
   useEffect(() => {
-    fetchTemplates();
-    fetchDefaultTemplates();
+    const contractType = data.contractType || "contract";
+    fetchTemplates(contractType);
+    fetchDefaultTemplates(contractType);
     fetchClients();
     
     // Check AI feature access
@@ -239,7 +276,8 @@ export default function NewContractPage() {
     
     checkAIAccess();
     checkBrandingAccess();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.contractType]);
 
   // Load draft if draftId is in URL
   const loadDraftFromDatabase = useCallback(async (id: string) => {
@@ -487,9 +525,10 @@ export default function NewContractPage() {
     }
   }, [step, isInitializing]);
 
-  const fetchTemplates = async () => {
+  const fetchTemplates = async (contractType?: "contract" | "proposal") => {
     try {
-      const response = await fetch("/api/templates");
+      const type = contractType || data.contractType || "contract";
+      const response = await fetch(`/api/templates?contractType=${type}`);
       if (response.ok) {
         const result = await response.json();
         setTemplates(result.templates || []);
@@ -501,9 +540,10 @@ export default function NewContractPage() {
     }
   };
 
-  const fetchDefaultTemplates = async () => {
+  const fetchDefaultTemplates = async (contractType?: "contract" | "proposal") => {
     try {
-      const response = await fetch("/api/templates/default");
+      const type = contractType || data.contractType || "contract";
+      const response = await fetch(`/api/templates/default?contractType=${type}`);
       const result = await response.json();
       
       if (response.ok && result.success) {
@@ -650,7 +690,67 @@ export default function NewContractPage() {
     if (generationParams) {
       setAIGenerationParams(generationParams);
     }
-    setIsAIReview(true); // Show review step instead of going to step 2
+    
+    // Automatically extract client info and proceed to next step
+    let clientInfo = extractClientInfoFromContent(aiContract.content);
+    
+    // Also try to extract from AI generation description if available
+    if (generationParams?.description) {
+      const descClientInfo = extractClientInfoFromContent(generationParams.description);
+      if (descClientInfo.name && !clientInfo.name) {
+        clientInfo.name = descClientInfo.name;
+      }
+      if (descClientInfo.email && !clientInfo.email) {
+        clientInfo.email = descClientInfo.email;
+      }
+    }
+    
+    // Try to find matching client by name
+    if (clientInfo.name) {
+      const matchingClient = clients.find(
+        (c) => c.name.toLowerCase().includes(clientInfo.name!.toLowerCase()) ||
+               clientInfo.name!.toLowerCase().includes(c.name.toLowerCase())
+      );
+      
+      if (matchingClient) {
+        // Auto-select matching client and go to step 3
+        setData({
+          ...data,
+          templateId: undefined,
+          template: undefined,
+          title: aiContract.title,
+          content: aiContract.content,
+          extractedFields,
+          clientId: matchingClient.id,
+          client: matchingClient,
+          detectedClientInfo: undefined,
+        });
+        toast({
+          title: "Client auto-selected",
+          description: `Found and selected client: ${matchingClient.name}`,
+        });
+        setStep(3); // Skip to step 3 since client is selected
+        return;
+      } else {
+        // Store detected client info for pre-filling in Step 2
+        setData({
+          ...data,
+          templateId: undefined,
+          template: undefined,
+          title: aiContract.title,
+          content: aiContract.content,
+          extractedFields,
+          detectedClientInfo: clientInfo,
+        });
+        toast({
+          title: "Client detected",
+          description: `Found client name "${clientInfo.name}" in contract. The form will be pre-filled in the next step.`,
+        });
+      }
+    }
+    
+    // Proceed to step 2 (choose client)
+    setStep(2);
   };
 
   // Function to extract client information from contract content
@@ -934,7 +1034,7 @@ export default function NewContractPage() {
     const hasValidCompType = compType && compType !== "no_compensation" && compType !== undefined;
     
     // Go to step 4 if compensation is enabled OR if there's a valid compensation type
-    const nextStep = (hasComp || hasValidCompType) ? 4 : 5;
+    const nextStep = (hasComp || hasValidCompType) ? 4 : 6;
     setStep(nextStep);
     
     // Immediately save step to draft so refresh restores correct step
@@ -1032,11 +1132,11 @@ export default function NewContractPage() {
       (updatedData as any).insertPaymentIntoContract = insertPaymentIntoContract;
     }
     setData(updatedData);
-    setStep(5);
+    setStep(6);
     
     // Immediately save step to draft so refresh restores correct step
     if (draftIdFromUrl || updatedData.templateId || updatedData.clientId) {
-      saveStepToDraft(5, updatedData);
+      saveStepToDraft(6, updatedData);
     }
   };
 
@@ -1194,7 +1294,9 @@ export default function NewContractPage() {
           <ChevronRight className="h-4 w-4" />
           <span className={(step ?? 0) >= 4 ? "font-medium text-foreground" : ""}>4. Amount</span>
           <ChevronRight className="h-4 w-4" />
-          <span className={(step ?? 0) >= 5 ? "font-medium text-foreground" : ""}>5. Preview</span>
+          <span className={(step ?? 0) >= 5 ? "font-medium text-foreground" : ""}>5. Style</span>
+          <ChevronRight className="h-4 w-4" />
+          <span className={(step ?? 0) >= 6 ? "font-medium text-foreground" : ""}>6. Preview</span>
         </div>
       </div>
 
@@ -1219,6 +1321,13 @@ export default function NewContractPage() {
           onAIGenerate={handleAIContractGenerate}
           onBack={() => router.back()}
           hasAIAccess={hasAIAccess}
+          contractType={data.contractType || "contract"}
+          setContractType={(type) => {
+            setData({ ...data, contractType: type });
+            // Refetch templates when contract type changes
+            fetchTemplates();
+            fetchDefaultTemplates();
+          }}
         />
       )}
 
@@ -1250,6 +1359,12 @@ export default function NewContractPage() {
           onNewClient={handleNewClient}
           onBack={() => setStep(1)}
           onCancel={() => router.back()}
+          contractType={data.contractType as "contract" | "proposal" | undefined}
+          setContractType={(type) => {
+            setData({ ...data, contractType: type });
+          }}
+          setData={setData}
+          data={data}
         />
       )}
 
@@ -1264,6 +1379,8 @@ export default function NewContractPage() {
           onBack={() => setStep(2)}
           draftId={draftIdFromUrl}
           currentStep={step}
+          branding={branding}
+          setBranding={setBranding}
         />
       )}
 
@@ -1275,21 +1392,33 @@ export default function NewContractPage() {
           paymentTerms={data.paymentTerms}
           paymentSchedule={(data as any).paymentSchedule}
           paymentMethods={(data as any).paymentMethods}
+          contractType={data.contractType as "contract" | "proposal" | undefined}
           onSubmit={handleAmountsSubmit}
           onBack={() => setStep(3)}
         />
       )}
 
       {step === 5 && !isInitializing && (
-        <Step5Preview
+        <Step5Styling
           data={data}
-          onSubmit={handlePreviewSubmit}
+          branding={branding}
+          setBranding={setBranding}
+          onSubmit={() => setStep(6)}
           onBack={() => setStep(data.hasCompensation ? 4 : 3)}
-          isLoading={isLoading}
-          hasAIAccess={hasAIAccess}
-          setData={setData}
         />
       )}
+
+      {step === 6 && !isInitializing && (
+        <Step6Preview
+          data={data}
+          setData={setData}
+          onSubmit={handlePreviewSubmit}
+          onBack={() => setStep(5)}
+          isLoading={isLoading}
+          hasAIAccess={hasAIAccess}
+        />
+      )}
+
     </div>
   );
 }
@@ -1304,6 +1433,8 @@ function Step1ChooseTemplate({
   onAIGenerate,
   onBack,
   hasAIAccess,
+  contractType,
+  setContractType,
 }: {
   templates: ContractTemplate[];
   defaultTemplates: any[];
@@ -1314,6 +1445,8 @@ function Step1ChooseTemplate({
   onAIGenerate: (contract: { title: string; content: string }, params?: { description: string; contractType?: string; additionalDetails?: string }) => void;
   onBack: () => void;
   hasAIAccess: boolean | null;
+  contractType: "contract" | "proposal";
+  setContractType: (type: "contract" | "proposal") => void;
 }) {
   const [activeTab, setActiveTab] = useState<"default" | "custom" | "scratch" | "ai">("default");
   const [aiDescription, setAiDescription] = useState("");
@@ -1323,7 +1456,18 @@ function Step1ChooseTemplate({
   const [aiQuestions, setAiQuestions] = useState<string[]>([]);
   const [needsMoreInfo, setNeedsMoreInfo] = useState(false);
   const [additionalInfo, setAdditionalInfo] = useState("");
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "ai"; content: string; timestamp: Date }>>([]);
+  const [currentMessage, setCurrentMessage] = useState("");
+  const [generatedContract, setGeneratedContract] = useState<{ title: string; content: string } | null>(null);
+  const [isEditingWithAI, setIsEditingWithAI] = useState(false);
+  const [editRequest, setEditRequest] = useState("");
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, isGenerating]);
 
   return (
     <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
@@ -1337,6 +1481,44 @@ function Step1ChooseTemplate({
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-4">
+        {/* Contract Type Selection */}
+        <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700">
+          <Label className="text-white font-semibold mb-3 block">Contract Type</Label>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setContractType("contract")}
+              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                contractType === "contract"
+                  ? "border-indigo-500 bg-indigo-600/20 text-white"
+                  : "border-slate-600 bg-slate-800/50 text-slate-300 hover:border-slate-500"
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <FileText className="h-5 w-5" />
+                <div className="text-left">
+                  <div className="font-semibold">Standard Contract</div>
+                  <div className="text-xs opacity-80">Client pays you</div>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setContractType("proposal")}
+              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                contractType === "proposal"
+                  ? "border-purple-500 bg-purple-600/20 text-white"
+                  : "border-slate-600 bg-slate-800/50 text-slate-300 hover:border-slate-500"
+              }`}
+            >
+              <div className="flex items-center justify-center gap-2">
+                <Handshake className="h-5 w-5" />
+                <div className="text-left">
+                  <div className="font-semibold">Proposal</div>
+                  <div className="text-xs opacity-80">You pay the client</div>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
         {/* Tabs */}
         <div className="flex gap-2 border-b border-slate-700 pb-2">
           <button
@@ -1537,197 +1719,338 @@ function Step1ChooseTemplate({
               </div>
             ) : (
               <>
-                <div className="text-center mb-6">
-                  <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-amber-600/20 to-orange-600/20 flex items-center justify-center border-2 border-amber-500/30">
-                    <Wand2 className="h-10 w-10 text-amber-400" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-white mb-2">AI Contract Generator</h3>
-                  <p className="text-slate-400 max-w-md mx-auto">
-                    Describe what you need, and AI will generate a professional contract for you.
-                  </p>
-                </div>
-
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="ai-description" className="text-white mb-2 block">
-                  Contract Description <span className="text-red-400">*</span>
-                </Label>
-                <Textarea
-                  id="ai-description"
-                  placeholder="e.g., A web development contract for building an e-commerce website with payment integration, user authentication, and admin dashboard. The project should be completed in 3 months with milestone-based payments."
-                  value={aiDescription}
-                  onChange={(e) => setAiDescription(e.target.value)}
-                  className="min-h-[120px] bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
-                  disabled={isGenerating}
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Be as detailed as possible about the work, timeline, and requirements
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="ai-contract-type" className="text-white mb-2 block">
-                  Contract Type (Optional)
-                </Label>
-                <Input
-                  id="ai-contract-type"
-                  placeholder="e.g., Service Agreement, Work Contract, Consulting Agreement"
-                  value={aiContractType}
-                  onChange={(e) => setAiContractType(e.target.value)}
-                  className="bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
-                  disabled={isGenerating}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="ai-additional-details" className="text-white mb-2 block">
-                  Additional Details (Optional)
-                </Label>
-                <Textarea
-                  id="ai-additional-details"
-                  placeholder="e.g., Include confidentiality clause, specify intellectual property ownership, add termination conditions"
-                  value={aiAdditionalDetails}
-                  onChange={(e) => setAiAdditionalDetails(e.target.value)}
-                  className="min-h-[80px] bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500"
-                  disabled={isGenerating}
-                />
-              </div>
-
-              {/* AI Questions Section */}
-              {needsMoreInfo && aiQuestions.length > 0 && (
-                <div className="bg-amber-900/20 border-2 border-amber-700/50 rounded-lg p-4 space-y-3">
-                  <div className="flex items-start gap-2">
-                    <Info className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <Label className="text-amber-300 font-semibold mb-2 block">
-                        More Information Needed
-                      </Label>
-                      <p className="text-sm text-amber-200/80 mb-3">
-                        To create the contract correctly, please provide the following information:
-                      </p>
-                      <ul className="space-y-2 mb-4">
-                        {aiQuestions.map((question, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-amber-100">
-                            <span className="text-amber-400 font-bold flex-shrink-0">•</span>
-                            <span>{question}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <div>
-                        <Label htmlFor="additional-info" className="text-amber-300 mb-2 block">
-                          Provide Additional Information
-                        </Label>
-                        <Textarea
-                          id="additional-info"
-                          placeholder="Answer the questions above with the additional details needed..."
-                          value={additionalInfo}
-                          onChange={(e) => setAdditionalInfo(e.target.value)}
-                          className="min-h-[100px] bg-slate-900/50 border-amber-600/50 text-white placeholder:text-slate-500"
-                          disabled={isGenerating}
-                        />
-                      </div>
+                {/* Chat Interface */}
+                <div className="flex flex-col h-[600px] border-2 border-slate-700/50 rounded-xl bg-slate-900/50 overflow-hidden">
+                  {/* Chat Header */}
+                  <div className="p-4 border-b border-slate-700/50 bg-slate-800/50 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-600/20 to-orange-600/20 flex items-center justify-center border border-amber-500/30">
+                      <Wand2 className="h-5 w-5 text-amber-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold">AI Contract Assistant</h3>
+                      <p className="text-xs text-slate-400">Let&apos;s create your contract together!</p>
                     </div>
                   </div>
+
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {chatMessages.length === 0 && !generatedContract && (
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-amber-600/20 to-orange-600/20 flex items-center justify-center border-2 border-amber-500/30">
+                          <Wand2 className="h-8 w-8 text-amber-400" />
+                        </div>
+                        <p className="text-slate-300 mb-2">Hey! 👋</p>
+                        <p className="text-slate-400 text-sm">Tell me about the contract you need, and I&apos;ll help you create it!</p>
+                      </div>
+                    )}
+
+                    {chatMessages.map((message, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-lg p-3 ${
+                            message.role === "user"
+                              ? "bg-indigo-600 text-white"
+                              : "bg-slate-800 text-slate-100 border border-slate-700"
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    {isGenerating && (
+                      <div className="flex justify-start">
+                        <div className="bg-slate-800 text-slate-100 border border-slate-700 rounded-lg p-3">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                            <span className="text-sm text-slate-300">Thinking...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatMessagesEndRef} />
+
+                    {/* Generated Contract Preview */}
+                    {generatedContract && !isEditingWithAI && (
+                      <div className="bg-green-900/20 border-2 border-green-700/50 rounded-lg p-4 space-y-3">
+                        <div className="flex items-start gap-2">
+                          <CheckCircle2 className="h-5 w-5 text-green-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <h4 className="text-green-300 font-semibold mb-2">Contract Generated! 🎉</h4>
+                            <p className="text-sm text-green-200/80 mb-3">
+                              I&apos;ve created your contract. You can edit it with AI or accept it as is.
+                            </p>
+                            <div className="bg-slate-900/50 rounded p-3 mb-3">
+                              <p className="text-sm font-semibold text-white mb-1">{generatedContract.title}</p>
+                              <p className="text-xs text-slate-400 line-clamp-2">{generatedContract.content.substring(0, 200)}...</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={() => setIsEditingWithAI(true)}
+                                variant="outline"
+                                size="sm"
+                                className="border-amber-600 text-amber-300 hover:bg-amber-900/30"
+                              >
+                                <Wand2 className="h-4 w-4 mr-2" />
+                                Edit with AI
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  onAIGenerate(generatedContract);
+                                }}
+                                size="sm"
+                                className="bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                                Accept & Continue
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Edit with AI */}
+                    {isEditingWithAI && generatedContract && (
+                      <div className="bg-amber-900/20 border-2 border-amber-700/50 rounded-lg p-4 space-y-3">
+                        <div className="flex items-start gap-2">
+                          <Wand2 className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <h4 className="text-amber-300 font-semibold mb-2">Edit with AI</h4>
+                            <p className="text-sm text-amber-200/80 mb-3">
+                              Tell me what you&apos;d like to change or improve in the contract.
+                            </p>
+                            <Textarea
+                              placeholder="e.g., Add a confidentiality clause, change payment terms to net 30, add termination conditions..."
+                              value={editRequest}
+                              onChange={(e) => setEditRequest(e.target.value)}
+                              className="min-h-[100px] bg-slate-900/50 border-amber-600/50 text-white placeholder:text-slate-500 mb-3"
+                              disabled={isGenerating}
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={async () => {
+                                  if (!editRequest.trim()) {
+                                    toast({
+                                      title: "Hey!",
+                                      description: "Please tell me what you'd like to change!",
+                                      variant: "destructive",
+                                    });
+                                    return;
+                                  }
+
+                                  setIsGenerating(true);
+                                  try {
+                                    const response = await fetch("/api/ai/edit-contract", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({
+                                        currentContent: generatedContract.content,
+                                        userMessage: editRequest,
+                                        contractType: contractType,
+                                      }),
+                                    });
+
+                                    if (response.ok) {
+                                      const result = await response.json();
+                                      if (result.success && result.modifiedContent) {
+                                        const updatedContract = {
+                                          ...generatedContract,
+                                          content: result.modifiedContent
+                                        };
+                                        setGeneratedContract(updatedContract);
+                                        setEditRequest("");
+                                        setIsEditingWithAI(false);
+                                        setChatMessages(prev => [
+                                          ...prev,
+                                          { role: "user", content: editRequest, timestamp: new Date() },
+                                          { role: "ai", content: "I've updated the contract based on your request! Moving to the next step...", timestamp: new Date() }
+                                        ]);
+                                        toast({
+                                          title: "Updated! ✨",
+                                          description: "Contract has been edited successfully! Moving to next step...",
+                                        });
+                                        // Automatically proceed to next step after editing
+                                        setTimeout(() => {
+                                          onAIGenerate(updatedContract);
+                                        }, 500);
+                                      } else {
+                                        throw new Error(result.message || "Failed to edit contract");
+                                      }
+                                    } else {
+                                      const error = await response.json();
+                                      throw new Error(error.message || "Failed to edit contract");
+                                    }
+                                  } catch (error: any) {
+                                    toast({
+                                      title: "Oops!",
+                                      description: error.message || "Something went wrong. Let's try again!",
+                                      variant: "destructive",
+                                    });
+                                  } finally {
+                                    setIsGenerating(false);
+                                  }
+                                }}
+                                size="sm"
+                                className="bg-amber-600 hover:bg-amber-700 text-white"
+                                disabled={isGenerating || !editRequest.trim()}
+                              >
+                                {isGenerating ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Editing...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Wand2 className="h-4 w-4 mr-2" />
+                                    Apply Changes
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setIsEditingWithAI(false);
+                                  setEditRequest("");
+                                }}
+                                variant="outline"
+                                size="sm"
+                                className="border-slate-600 text-slate-300"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Chat Input */}
+                  {!generatedContract && (
+                    <div className="p-4 border-t border-slate-700/50 bg-slate-800/50">
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!currentMessage.trim() || isGenerating) return;
+
+                          const userMessage = currentMessage;
+                          setCurrentMessage("");
+                          setChatMessages(prev => [...prev, { role: "user", content: userMessage, timestamp: new Date() }]);
+                          setIsGenerating(true);
+
+                          try {
+                            // Combine all previous messages for context
+                            const conversationHistory = [...chatMessages, { role: "user" as const, content: userMessage, timestamp: new Date() }]
+                              .map(m => `${m.role === "user" ? "You" : "AI"}: ${m.content}`)
+                              .join("\n\n");
+
+                            // Create a timeout promise
+                            const timeoutPromise = new Promise((_, reject) => {
+                              setTimeout(() => reject(new Error("Request timed out. Please try again.")), 60000); // 60 second timeout
+                            });
+
+                            // Race between fetch and timeout
+                            const fetchPromise = fetch("/api/ai/generate-contract", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                description: conversationHistory,
+                                contractType: contractType,
+                              }),
+                            });
+
+                            const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+
+                            if (!response.ok) {
+                              let errorMessage = "Failed to generate contract";
+                              try {
+                                const error = await response.json();
+                                errorMessage = error.message || error.error || errorMessage;
+                              } catch {
+                                errorMessage = `Server error: ${response.status} ${response.statusText}`;
+                              }
+                              throw new Error(errorMessage);
+                            }
+
+                            const result = await response.json();
+                            
+                            if (result.needsMoreInfo && result.questions) {
+                              const questionsText = result.questions.join("\n• ");
+                              const aiResponse = `${result.message || "I need a bit more information to create the perfect contract for you. Could you please provide:"}\n\n• ${questionsText}`;
+                              setChatMessages(prev => [...prev, { role: "ai", content: aiResponse, timestamp: new Date() }]);
+                              setIsGenerating(false);
+                              return;
+                            }
+                            
+                            if (result.success && result.contract) {
+                              setGeneratedContract(result.contract);
+                              setChatMessages(prev => [...prev, { 
+                                role: "ai", 
+                                content: "Perfect! I've created your contract. Moving to the next step...", 
+                                timestamp: new Date() 
+                              }]);
+                              toast({
+                                title: "All done! 🎉",
+                                description: "Your contract is ready! Moving to next step...",
+                              });
+                              // Automatically proceed to next step after a brief delay
+                              setTimeout(() => {
+                                onAIGenerate(result.contract);
+                              }, 1000);
+                            } else {
+                              throw new Error(result.message || result.error || "Failed to generate contract");
+                            }
+                          } catch (error: any) {
+                            console.error("AI chat error:", error);
+                            const errorMessage = error.message || "Something went wrong. Let's try again!";
+                            setChatMessages(prev => [...prev, { 
+                              role: "ai", 
+                              content: `Oops! ${errorMessage}`, 
+                              timestamp: new Date() 
+                            }]);
+                            toast({
+                              title: "Oops!",
+                              description: errorMessage,
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setIsGenerating(false);
+                          }
+                        }}
+                        className="flex gap-2"
+                      >
+                        <Textarea
+                          placeholder="Type your message here... Tell me about your contract needs!"
+                          value={currentMessage}
+                          onChange={(e) => setCurrentMessage(e.target.value)}
+                          className="flex-1 bg-slate-900/50 border-slate-600 text-white placeholder:text-slate-500 resize-none"
+                          disabled={isGenerating}
+                          rows={2}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              e.currentTarget.form?.requestSubmit();
+                            }
+                          }}
+                        />
+                        <Button
+                          type="submit"
+                          disabled={!currentMessage.trim() || isGenerating}
+                          className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white"
+                        >
+                          {isGenerating ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </form>
+                    </div>
+                  )}
                 </div>
-              )}
-
-              <Button
-                onClick={async () => {
-                  if (!aiDescription.trim()) {
-                    toast({
-                      title: "Description required",
-                      description: "Please provide a description of the contract you need.",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-
-                  setIsGenerating(true);
-                  try {
-                    // Combine all additional details
-                    const allAdditionalDetails = [
-                      aiAdditionalDetails,
-                      needsMoreInfo && additionalInfo.trim() ? additionalInfo : null
-                    ].filter(Boolean).join("\n\n");
-                    
-                    const response = await fetch("/api/ai/generate-contract", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        description: aiDescription,
-                        contractType: aiContractType || undefined,
-                        additionalDetails: allAdditionalDetails || undefined,
-                      }),
-                    });
-
-                    if (response.ok) {
-                      const result = await response.json();
-                      
-                      // Check if AI needs more information
-                      if (result.needsMoreInfo && result.questions) {
-                        setNeedsMoreInfo(true);
-                        setAiQuestions(result.questions);
-                        toast({
-                          title: "More information needed",
-                          description: result.message || "Please provide additional details to create the contract correctly.",
-                        });
-                        setIsGenerating(false);
-                        return;
-                      }
-                      
-                      if (result.success && result.contract) {
-                        toast({
-                          title: "Contract generated",
-                          description: "AI has successfully generated your contract!",
-                        });
-                        // Reset questions state
-                        setNeedsMoreInfo(false);
-                        setAiQuestions([]);
-                        setAdditionalInfo("");
-                        onAIGenerate(result.contract, {
-                          description: aiDescription,
-                          contractType: aiContractType || undefined,
-                          additionalDetails: aiAdditionalDetails || undefined,
-                        });
-                      } else {
-                        throw new Error(result.message || "Failed to generate contract");
-                      }
-                    } else {
-                      const error = await response.json();
-                      throw new Error(error.message || "Failed to generate contract");
-                    }
-                  } catch (error: any) {
-                    toast({
-                      title: "Generation failed",
-                      description: error.message || "Something went wrong. Please try again.",
-                      variant: "destructive",
-                    });
-                  } finally {
-                    setIsGenerating(false);
-                  }
-                }}
-                className="w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white"
-                size="lg"
-                disabled={isGenerating || !aiDescription.trim() || (needsMoreInfo && !additionalInfo.trim()) || hasAIAccess !== true}
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {needsMoreInfo ? "Processing Additional Information..." : "Generating Contract..."}
-                  </>
-                ) : needsMoreInfo ? (
-                  <>
-                    <Wand2 className="h-4 w-4 mr-2" />
-                    Generate with Additional Info
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="h-4 w-4 mr-2" />
-                    Generate Contract with AI
-                  </>
-                )}
-              </Button>
-            </div>
               </>
             )}
           </div>
@@ -2105,6 +2428,10 @@ function Step2ChooseClient({
   onBack,
   onCancel,
   detectedClientInfo,
+  contractType,
+  setContractType,
+  setData,
+  data,
 }: {
   clients: Client[];
   loading: boolean;
@@ -2115,6 +2442,10 @@ function Step2ChooseClient({
   onBack: () => void;
   onCancel: () => void;
   detectedClientInfo?: { name?: string; email?: string };
+  contractType?: "contract" | "proposal";
+  setContractType?: (type: "contract" | "proposal") => void;
+  setData?: (data: ContractData | ((prev: ContractData) => ContractData)) => void;
+  data?: ContractData;
 }) {
   const [formData, setFormData] = useState({
     name: detectedClientInfo?.name || "",
@@ -2217,12 +2548,74 @@ function Step2ChooseClient({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Choose Client</CardTitle>
-        <CardDescription>Select an existing client or create a new one</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="space-y-6">
+      {/* Contract Type Selector */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Contract Type</CardTitle>
+          <CardDescription>Choose the type of contract you&apos;re creating</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const newType = "contract";
+                if (setContractType) setContractType(newType);
+                if (setData && data) {
+                  setData({ ...data, contractType: newType });
+                }
+              }}
+              className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                (contractType || "contract") === "contract"
+                  ? "border-indigo-500 bg-indigo-600/20 text-white"
+                  : "border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              <FileText className="h-4 w-4" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">Standard Contract</div>
+                <div className="text-xs opacity-80">Client pays you</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const newType = "proposal";
+                if (setContractType) setContractType(newType);
+                if (setData && data) {
+                  setData({ ...data, contractType: newType });
+                }
+              }}
+              className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                contractType === "proposal"
+                  ? "border-indigo-500 bg-indigo-600/20 text-white"
+                  : "border-slate-600 bg-slate-700/50 text-slate-300 hover:bg-slate-700"
+              }`}
+            >
+              <Handshake className="h-4 w-4" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">Proposal</div>
+                <div className="text-xs opacity-80">You offer to pay client</div>
+              </div>
+            </button>
+          </div>
+          {contractType === "proposal" && (
+            <p className="text-xs text-indigo-300 flex items-center gap-1">
+              <Info className="h-3 w-3" />
+              This is a proposal where you&apos;re offering compensation to the client
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Client Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Choose Client</CardTitle>
+          <CardDescription>Select an existing client or create a new one</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
         {loading ? (
           <p className="text-muted-foreground">Loading clients...</p>
         ) : (
@@ -2268,6 +2661,7 @@ function Step2ChooseClient({
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 }
 
@@ -2281,6 +2675,8 @@ function Step3ContractBuilder({
   draftId: initialDraftId,
   currentStep,
   hasBrandingAccess,
+  branding,
+  setBranding,
 }: {
   data: ContractData;
   setData: (data: ContractData) => void;
@@ -2295,6 +2691,8 @@ function Step3ContractBuilder({
   draftId?: string | null;
   currentStep: number;
   hasBrandingAccess?: boolean | null;
+  branding?: any;
+  setBranding?: (branding: any) => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>(fieldValues);
   const [title, setTitle] = useState(data.title);
@@ -2467,7 +2865,8 @@ function Step3ContractBuilder({
   const contentRef = useRef<HTMLTextAreaElement>(null);
 
   // Quick insert templates for payment terms and legal clauses
-  const paymentTermTemplates = [
+  // Standard contract templates
+  const standardPaymentTermTemplates = [
     {
       id: "net30",
       label: "Net 30",
@@ -2566,6 +2965,81 @@ function Step3ContractBuilder({
     },
   ];
 
+  // Proposal-specific compensation templates
+  const proposalCompensationTemplates = [
+    {
+      id: "compensation_schedule",
+      label: "Compensation Schedule",
+      icon: Clock,
+      template: "Compensation Terms: Compensation will be provided according to the schedule outlined in this proposal. Payments will be made upon completion and acceptance of deliverables.",
+    },
+    {
+      id: "initial_payment",
+      label: "Initial Payment",
+      icon: DollarSign,
+      template: "Initial Payment: An initial payment will be made upon acceptance of this proposal. This payment demonstrates commitment to the agreement.",
+    },
+    {
+      id: "milestone_compensation",
+      label: "Milestone Compensation",
+      icon: Target,
+      template: "Compensation Schedule:\n- Initial payment upon proposal acceptance\n- Milestone payments as work progresses (as specified in project timeline)\n- Final payment upon completion and acceptance",
+    },
+    {
+      id: "split_compensation",
+      label: "Split Compensation",
+      icon: CreditCard,
+      template: "Compensation Schedule:\n- 50% initial payment upon signing this proposal\n- 50% final payment due upon completion and acceptance of all deliverables",
+    },
+    {
+      id: "three_installments",
+      label: "Three Installments",
+      icon: CreditCard,
+      template: "Compensation Schedule:\n- 33% initial payment upon signing\n- 33% at project midpoint\n- 34% upon final delivery and acceptance",
+    },
+    {
+      id: "payment_methods_offer",
+      label: "Payment Methods",
+      icon: CreditCard,
+      template: "Payment Methods: Compensation will be provided via Credit Card, Bank Transfer (ACH), Check, or Wire Transfer. Payment details and instructions will be provided upon agreement acceptance.",
+    },
+    {
+      id: "compensation_timeline",
+      label: "Compensation Timeline",
+      icon: Calendar,
+      template: "Compensation Timeline: All compensation payments will be made within the timeframes specified in this proposal. Payments are scheduled to align with project milestones and deliverables.",
+    },
+    {
+      id: "compensation_terms",
+      label: "Compensation Terms",
+      icon: FileText,
+      template: "Compensation Terms: This proposal outlines the compensation being offered. All terms are subject to acceptance of this proposal and completion of agreed-upon work.",
+    },
+    {
+      id: "offer_validity",
+      label: "Offer Validity",
+      icon: Clock,
+      template: "Offer Validity: This compensation offer is valid for 30 days from the proposal date. Acceptance must be confirmed in writing within this timeframe.",
+    },
+    {
+      id: "compensation_upon_approval",
+      label: "Compensation on Approval",
+      icon: CheckSquare,
+      template: "Compensation will be provided within 7 days of written approval of deliverables. If approval or feedback is not provided within 14 days, deliverables will be deemed approved and compensation will be provided accordingly.",
+    },
+    {
+      id: "compensation_conditions",
+      label: "Compensation Conditions",
+      icon: AlertCircle,
+      template: "Compensation Conditions: Compensation is offered subject to the terms and conditions outlined in this proposal. All compensation is contingent upon completion of agreed-upon work to satisfaction.",
+    },
+  ];
+
+  // Use proposal templates if contract type is proposal, otherwise use standard templates
+  const paymentTermTemplates = data.contractType === "proposal" 
+    ? proposalCompensationTemplates 
+    : standardPaymentTermTemplates;
+
   // Custom fields for scratch mode
   const [customFields, setCustomFields] = useState<Array<{
     id: string;
@@ -2595,7 +3069,8 @@ function Step3ContractBuilder({
   const [showTemplates, setShowTemplates] = useState(false);
   const [showBranding, setShowBranding] = useState(false);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
-  const [branding, setBranding] = useState({
+  // Use branding from props if provided, otherwise use local state
+  const [localBranding, setLocalBranding] = useState({
     // Logo settings
     logo: "",
     showLogo: true,
@@ -2915,13 +3390,18 @@ function Step3ContractBuilder({
         return;
       }
       const reader = new FileReader();
-      reader.onload = (event) => setBranding({ ...branding, logo: event.target?.result as string });
+      reader.onload = (event) => {
+        if (setBranding && branding) {
+          setBranding({ ...branding, logo: event.target?.result as string });
+        }
+      };
       reader.readAsDataURL(file);
     }
   };
 
   // Generate branded PDF HTML
   const getBrandedPdfHtml = (previewContent: string) => {
+    if (!branding) return previewContent;
     const headerAlign = branding.headerStyle === "centered" ? "center" : branding.headerStyle;
     // Escape quotes and backticks to prevent template literal issues
     const escapeForTemplate = (str: string) => (str || "").replace(/`/g, "\\`").replace(/\${/g, "\\${");
@@ -3040,8 +3520,8 @@ function Step3ContractBuilder({
     toast({ title: "Template loaded", description: `${template.name} template with ${newFields.length} fields ready.` });
   };
 
-  // Contract snippets for quick insert
-  const contractSnippets = [
+  // Contract snippets for quick insert - Standard contract versions
+  const standardContractSnippets = [
     { 
       id: "header", 
       name: "Contract Header", 
@@ -3073,6 +3553,45 @@ function Step3ContractBuilder({
       snippet: "\n---\n\nAGREED AND ACCEPTED:\n\nService Provider:\nSignature: _________________________\nName: {{providerName}}\nDate: _________________________\n\nClient:\nSignature: _________________________\nName: {{clientName}}\nDate: _________________________\n"
     },
   ];
+
+  // Proposal-specific snippets
+  const proposalContractSnippets = [
+    { 
+      id: "header", 
+      name: "Proposal Header", 
+      icon: FileText,
+      snippet: "PROPOSAL AGREEMENT\n\nThis Proposal is submitted as of {{date}} by:\n\nService Provider: {{providerName}}\nTo Client: {{clientName}}\n\n---\n\n"
+    },
+    { 
+      id: "services", 
+      name: "Services Section", 
+      icon: Briefcase,
+      snippet: "SERVICES\n\nThe Service Provider proposes to provide the following services:\n\n{{serviceDescription}}\n\nDeliverables:\n- {{deliverable1}}\n- {{deliverable2}}\n- {{deliverable3}}\n\n"
+    },
+    { 
+      id: "payment", 
+      name: "Compensation Terms", 
+      icon: DollarSign,
+      snippet: "COMPENSATION TERMS\n\nTotal Compensation: ${{totalAmount}}\nInitial Payment: ${{depositAmount}}\n\nCompensation Schedule:\n- Initial payment due upon proposal acceptance\n- Remaining balance due upon completion\n\nPayment Methods: Credit Card, Bank Transfer, or Check\n\n"
+    },
+    { 
+      id: "timeline", 
+      name: "Timeline & Milestones", 
+      icon: Calendar,
+      snippet: "TIMELINE\n\nProject Start Date: {{startDate}}\nEstimated Completion: {{endDate}}\n\nMilestones:\n1. {{milestone1}} - Due: {{milestone1Date}}\n2. {{milestone2}} - Due: {{milestone2Date}}\n\n"
+    },
+    { 
+      id: "signature", 
+      name: "Signature Block", 
+      icon: Type,
+      snippet: "\n---\n\nAGREED AND ACCEPTED:\n\nService Provider:\nSignature: _________________________\nName: {{providerName}}\nDate: _________________________\n\nClient:\nSignature: _________________________\nName: {{clientName}}\nDate: _________________________\n"
+    },
+  ];
+
+  // Use proposal snippets if contract type is proposal, otherwise use standard snippets
+  const contractSnippets = data.contractType === "proposal" 
+    ? proposalContractSnippets 
+    : standardContractSnippets;
 
   // Legal clauses
   const legalClauses = [
@@ -3283,12 +3802,17 @@ function Step3ContractBuilder({
     const section = contractChecklist.find(s => s.id === sectionId);
     if (!section || !section.quickInsert) return;
     
+    // Get the appropriate label (proposal-aware)
+    const sectionLabel = sectionId === "payment" && data.contractType === "proposal" 
+      ? "Compensation Terms" 
+      : section.label;
+    
     // Check if content already has this section (avoid duplicates)
     const lowerContent = content.toLowerCase();
     if (section.keywords.some(keyword => lowerContent.includes(keyword))) {
       toast({ 
         title: "Section may already exist", 
-        description: `Your contract appears to already have ${section.label}. Adding anyway...`,
+        description: `Your contract appears to already have ${sectionLabel}. Adding anyway...`,
       });
     }
     
@@ -3335,11 +3859,17 @@ function Step3ContractBuilder({
       }
     }
     
+    // Get the appropriate quick insert template (proposal-aware for payment section)
+    let insertTemplate = section.quickInsert;
+    if (sectionId === "payment" && data.contractType === "proposal") {
+      insertTemplate = "COMPENSATION TERMS\n\nTotal Compensation: ${{totalAmount}}\n\nCompensation Schedule:\n- Initial Payment (50%): ${{depositAmount}} - Due upon signing\n- Final (50%): Due upon completion\n\nPayment Methods: Credit Card, Bank Transfer, or Check\n\n";
+    }
+    
     // Insert the section
     const newContent = 
       content.slice(0, insertPosition) + 
       insertPrefix + 
-      section.quickInsert + 
+      insertTemplate + 
       content.slice(insertPosition);
     
     setContent(newContent);
@@ -3348,7 +3878,7 @@ function Step3ContractBuilder({
     const placeholderRegex = /\{\{(\w+)\}\}/g;
     let match;
     const newFields: typeof customFields = [...customFields];
-    while ((match = placeholderRegex.exec(section.quickInsert)) !== null) {
+    while ((match = placeholderRegex.exec(insertTemplate)) !== null) {
       const fieldId = match[1];
       if (!newFields.find(f => f.id === fieldId)) {
         newFields.push({
@@ -3365,7 +3895,7 @@ function Step3ContractBuilder({
     setCustomFields(newFields);
     
     toast({ 
-      title: `✅ ${section.label} added!`, 
+      title: `✅ ${sectionLabel} added!`, 
       description: `Section inserted with ${newFields.length - customFields.length} new fields.` 
     });
   };
@@ -3984,10 +4514,18 @@ function Step3ContractBuilder({
   // Check checklist items
   const getChecklistStatus = () => {
     const lowerContent = content.toLowerCase();
-    return contractChecklist.map(item => ({
-      ...item,
-      checked: item.keywords.some(keyword => lowerContent.includes(keyword))
-    }));
+    return contractChecklist.map(item => {
+      // Update label for payment section if it's a proposal
+      let label = item.label;
+      if (item.id === "payment" && data.contractType === "proposal") {
+        label = "Compensation Terms";
+      }
+      return {
+        ...item,
+        label,
+        checked: item.keywords.some(keyword => lowerContent.includes(keyword))
+      };
+    });
   };
 
   // Find legal terms in content for tooltips
@@ -4337,7 +4875,9 @@ function Step3ContractBuilder({
                 <div className="flex-1 space-y-3">
                   <div className="flex items-center gap-2">
                     <Label htmlFor="hasCompensation" className="text-slate-300 font-semibold cursor-pointer">
-                      This contract includes payment or compensation
+                      {data.contractType === "proposal" 
+                        ? "This proposal includes compensation I'm offering to the client"
+                        : "This contract includes payment or compensation"}
                     </Label>
                     <DollarSign className="h-4 w-4 text-indigo-400" />
                   </div>
@@ -4717,12 +5257,12 @@ function Step3ContractBuilder({
                   <>
                     <div className="grid grid-cols-2 gap-1">
                       {(["header", "watermark", "footer", "corner"] as const).map((pos) => (
-                        <button key={pos} onClick={() => setBranding({ ...branding, logoPosition: pos })} className={`py-1 rounded text-[9px] ${branding.logoPosition === pos ? "bg-pink-600 text-white" : "bg-slate-700 text-slate-400"}`}>{pos}</button>
+                        <button key={pos} onClick={() => setBranding?.({ ...branding, logoPosition: pos })} className={`py-1 rounded text-[9px] ${branding.logoPosition === pos ? "bg-pink-600 text-white" : "bg-slate-700 text-slate-400"}`}>{pos}</button>
                       ))}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] text-slate-400">Opacity</span>
-                      <input type="range" min="10" max="100" value={branding.logoOpacity} onChange={(e) => setBranding({ ...branding, logoOpacity: parseInt(e.target.value) })} className="flex-1 h-1 accent-pink-500" />
+                      <input type="range" min="10" max="100" value={branding.logoOpacity} onChange={(e) => setBranding?.({ ...branding, logoOpacity: parseInt(e.target.value) })} className="flex-1 h-1 accent-pink-500" />
                       <span className="text-[9px] text-slate-400">{branding.logoOpacity}%</span>
                     </div>
                   </>
@@ -4732,18 +5272,18 @@ function Step3ContractBuilder({
               {/* Company & Colors */}
               <div className="space-y-2 p-2 rounded-lg bg-slate-700/20 border border-slate-700">
                 <div className="text-xs font-medium text-white flex items-center gap-1"><Type className="h-3 w-3 text-purple-400" />Company</div>
-                <Input value={branding.companyName} onChange={(e) => setBranding({ ...branding, companyName: e.target.value })} placeholder="Company Name" className="bg-slate-700/50 border-slate-600 text-white text-xs h-7" />
+                <Input value={branding.companyName} onChange={(e) => setBranding?.({ ...branding, companyName: e.target.value })} placeholder="Company Name" className="bg-slate-700/50 border-slate-600 text-white text-xs h-7" />
                 <div className="grid grid-cols-3 gap-1">
-                  <div><Label className="text-[9px] text-slate-400">Primary</Label><input type="color" value={branding.primaryColor} onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
-                  <div><Label className="text-[9px] text-slate-400">Secondary</Label><input type="color" value={branding.secondaryColor} onChange={(e) => setBranding({ ...branding, secondaryColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
-                  <div><Label className="text-[9px] text-slate-400">Accent</Label><input type="color" value={branding.accentColor} onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
+                  <div><Label className="text-[9px] text-slate-400">Primary</Label><input type="color" value={branding.primaryColor} onChange={(e) => setBranding?.({ ...branding, primaryColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
+                  <div><Label className="text-[9px] text-slate-400">Secondary</Label><input type="color" value={branding.secondaryColor} onChange={(e) => setBranding?.({ ...branding, secondaryColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
+                  <div><Label className="text-[9px] text-slate-400">Accent</Label><input type="color" value={branding.accentColor} onChange={(e) => setBranding?.({ ...branding, accentColor: e.target.value })} className="w-full h-6 rounded cursor-pointer border border-slate-600" /></div>
                 </div>
               </div>
 
               {/* Layout */}
               <div className="space-y-2 p-2 rounded-lg bg-slate-700/20 border border-slate-700">
                 <div className="text-xs font-medium text-white flex items-center gap-1"><AlignLeft className="h-3 w-3 text-blue-400" />Layout</div>
-                <select value={branding.fontFamily} onChange={(e) => setBranding({ ...branding, fontFamily: e.target.value })} className="w-full h-7 rounded border border-slate-600 bg-slate-700/50 px-2 text-[10px] text-white">
+                <select value={branding?.fontFamily || "Georgia, serif"} onChange={(e) => setBranding && branding && setBranding({ ...branding, fontFamily: e.target.value })} className="w-full h-7 rounded border border-slate-600 bg-slate-700/50 px-2 text-[10px] text-white">
                   <option value="Georgia, serif">Georgia</option>
                   <option value="'Times New Roman', serif">Times New Roman</option>
                   <option value="Calibri, sans-serif">Calibri</option>
@@ -4751,12 +5291,12 @@ function Step3ContractBuilder({
                 </select>
                 <div className="flex gap-1">
                   {(["left", "centered", "right"] as const).map((align) => (
-                    <button key={align} onClick={() => setBranding({ ...branding, headerStyle: align })} className={`flex-1 py-1 rounded text-[9px] ${branding.headerStyle === align ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-400"}`}>{align === "centered" ? "Center" : align.charAt(0).toUpperCase()}</button>
+                    <button key={align} onClick={() => setBranding?.({ ...branding, headerStyle: align })} className={`flex-1 py-1 rounded text-[9px] ${branding.headerStyle === align ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-400"}`}>{align === "centered" ? "Center" : align.charAt(0).toUpperCase()}</button>
                   ))}
                 </div>
                 <div className="flex gap-1">
                   {(["none", "solid", "double", "dashed"] as const).map((style) => (
-                    <button key={style} onClick={() => setBranding({ ...branding, borderStyle: style, showBorder: style !== "none" })} className={`flex-1 py-1 rounded text-[9px] ${branding.borderStyle === style ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-400"}`}>{style.charAt(0).toUpperCase()}</button>
+                    <button key={style} onClick={() => setBranding?.({ ...branding, borderStyle: style, showBorder: style !== "none" })} className={`flex-1 py-1 rounded text-[9px] ${branding.borderStyle === style ? "bg-blue-600 text-white" : "bg-slate-700 text-slate-400"}`}>{style.charAt(0).toUpperCase()}</button>
                   ))}
                 </div>
               </div>
@@ -4765,17 +5305,17 @@ function Step3ContractBuilder({
               <div className="space-y-2 p-2 rounded-lg bg-slate-700/20 border border-slate-700">
                 <div className="text-xs font-medium text-white flex items-center gap-1"><Eye className="h-3 w-3 text-green-400" />Extras</div>
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={branding.showWatermark} onChange={(e) => setBranding({ ...branding, showWatermark: e.target.checked })} className="rounded border-slate-600 h-3 w-3" />
+                  <input type="checkbox" checked={branding.showWatermark} onChange={(e) => setBranding?.({ ...branding, showWatermark: e.target.checked })} className="rounded border-slate-600 h-3 w-3" />
                   <span className="text-[10px] text-slate-400">Watermark</span>
                 </div>
-                {branding.showWatermark && <Input value={branding.watermarkText} onChange={(e) => setBranding({ ...branding, watermarkText: e.target.value })} placeholder="DRAFT..." className="bg-slate-700/50 border-slate-600 text-white text-xs h-6" />}
+                {branding.showWatermark && <Input value={branding.watermarkText} onChange={(e) => setBranding?.({ ...branding, watermarkText: e.target.value })} placeholder="DRAFT..." className="bg-slate-700/50 border-slate-600 text-white text-xs h-6" />}
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={branding.showFooter} onChange={(e) => setBranding({ ...branding, showFooter: e.target.checked })} className="rounded border-slate-600 h-3 w-3" />
+                  <input type="checkbox" checked={branding.showFooter} onChange={(e) => setBranding?.({ ...branding, showFooter: e.target.checked })} className="rounded border-slate-600 h-3 w-3" />
                   <span className="text-[10px] text-slate-400">Footer</span>
                 </div>
                 <div className="grid grid-cols-2 gap-1">
-                  <button onClick={() => setBranding({ ...branding, primaryColor: "#1e40af", secondaryColor: "#3b82f6", fontFamily: "'Times New Roman', serif" })} className="py-1 rounded text-[9px] bg-blue-900/50 text-blue-300 border border-blue-800">🏢 Corp</button>
-                  <button onClick={() => setBranding({ ...branding, primaryColor: "#059669", secondaryColor: "#10b981", fontFamily: "Calibri, sans-serif" })} className="py-1 rounded text-[9px] bg-green-900/50 text-green-300 border border-green-800">🌿 Modern</button>
+                  <button onClick={() => setBranding?.({ ...branding, primaryColor: "#1e40af", secondaryColor: "#3b82f6", fontFamily: "'Times New Roman', serif" })} className="py-1 rounded text-[9px] bg-blue-900/50 text-blue-300 border border-blue-800">🏢 Corp</button>
+                  <button onClick={() => setBranding?.({ ...branding, primaryColor: "#059669", secondaryColor: "#10b981", fontFamily: "Calibri, sans-serif" })} className="py-1 rounded text-[9px] bg-green-900/50 text-green-300 border border-green-800">🌿 Modern</button>
                 </div>
               </div>
             </div>
@@ -5433,10 +5973,12 @@ function Step3ContractBuilder({
             <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-700">
               <CardTitle className="text-lg font-bold text-white flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-indigo-400" />
-                Payment & Compensation
+                {data.contractType === "proposal" ? "Compensation Offer" : "Payment & Compensation"}
               </CardTitle>
               <CardDescription className="text-slate-400">
-                Specify if this contract includes payment or compensation
+                {data.contractType === "proposal" 
+                  ? "Specify if this proposal includes compensation you're offering to the client"
+                  : "Specify if this contract includes payment or compensation"}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
@@ -5460,7 +6002,9 @@ function Step3ContractBuilder({
                 />
                 <div className="flex-1 space-y-3">
                   <Label htmlFor="hasCompensationScratch" className="text-slate-300 font-semibold cursor-pointer text-base">
-                    This contract includes payment or compensation
+                    {data.contractType === "proposal" 
+                      ? "This proposal includes compensation I'm offering to the client"
+                      : "This contract includes payment or compensation"}
                   </Label>
                   {hasCompensation && (
                     <div className="space-y-3 pl-6 border-l-2 border-indigo-500/30 pt-2">
@@ -5524,7 +6068,9 @@ function Step3ContractBuilder({
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <Label htmlFor="paymentTermsScratch" className="text-slate-400 text-sm">
-                            Payment Terms & Legal Clauses
+                            {data.contractType === "proposal" 
+                              ? "Compensation Terms & Legal Clauses" 
+                              : "Payment Terms & Legal Clauses"}
                           </Label>
                           <button
                             type="button"
@@ -5540,7 +6086,11 @@ function Step3ContractBuilder({
                           <div className="p-3 rounded-lg border border-indigo-500/30 bg-indigo-900/10 mb-2 animate-in slide-in-from-top-2">
                             <div className="flex items-center gap-2 mb-2">
                               <Zap className="h-3.5 w-3.5 text-indigo-400" />
-                              <p className="text-xs font-medium text-indigo-300">Quick Insert Payment Clauses</p>
+                              <p className="text-xs font-medium text-indigo-300">
+                                {data.contractType === "proposal" 
+                                  ? "Quick Insert Compensation Clauses" 
+                                  : "Quick Insert Payment Clauses"}
+                              </p>
                               <span className="text-[10px] text-slate-500 ml-auto">Click to add</span>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-[240px] overflow-y-auto pr-1 custom-scrollbar">
@@ -5556,7 +6106,9 @@ function Step3ContractBuilder({
                                         setPaymentTerms(newTerms);
                                         toast({
                                           title: `✅ ${template.label} added`,
-                                          description: "Payment clause inserted into terms.",
+                                          description: data.contractType === "proposal" 
+                                            ? "Compensation clause inserted into terms."
+                                            : "Payment clause inserted into terms.",
                                         });
                                       }}
                                       className="flex flex-col items-center gap-1 p-2 rounded-lg border border-slate-600 bg-slate-700/50 hover:bg-indigo-600/30 hover:border-indigo-500 transition-all group"
@@ -5572,7 +6124,7 @@ function Step3ContractBuilder({
                               ))}
                             </div>
                             <p className="text-[10px] text-slate-500 mt-2 text-center">
-                              💡 Click any clause to insert it into your payment terms
+                              💡 Click any clause to insert it into your {data.contractType === "proposal" ? "compensation" : "payment"} terms
                             </p>
                           </div>
                         )}
@@ -5581,17 +6133,23 @@ function Step3ContractBuilder({
                           className="bg-slate-700/50 border-slate-600 text-white min-h-[120px]"
                           value={paymentTerms}
                           onChange={(e) => setPaymentTerms(e.target.value)}
-                          placeholder="E.g., Net 30 days, payment due upon completion, late fees of 1.5% per month, payment schedule, refund policy, etc. Click 'Quick Inserts' above for common clauses."
+                          placeholder={data.contractType === "proposal"
+                            ? "E.g., Compensation schedule, when payments will be made, terms of the offer, payment methods, etc. Click 'Quick Inserts' above for common clauses."
+                            : "E.g., Net 30 days, payment due upon completion, late fees of 1.5% per month, payment schedule, refund policy, etc. Click 'Quick Inserts' above for common clauses."}
                         />
                         <p className="text-xs text-slate-500">
-                          Specify payment terms, schedules, penalties, late fees, refund policies, and other legal payment-related clauses. Use Quick Inserts for common clauses.
+                          {data.contractType === "proposal"
+                            ? "Specify compensation terms, payment schedules, and other legal clauses for your offer. Use Quick Inserts for common compensation clauses."
+                            : "Specify payment terms, schedules, penalties, late fees, refund policies, and other legal payment-related clauses. Use Quick Inserts for common clauses."}
                         </p>
                       </div>
                     </div>
                   )}
                   {!hasCompensation && (
                     <p className="text-xs text-slate-500 pl-6 border-l-2 border-slate-700 pt-2">
-                      No compensation or payment will be specified for this contract. You can skip the payment step.
+                      {data.contractType === "proposal"
+                        ? "No compensation will be specified for this proposal. You can skip the payment step."
+                        : "No compensation or payment will be specified for this contract. You can skip the payment step."}
                     </p>
                   )}
                 </div>
@@ -5997,6 +6555,7 @@ function Step4SetAmounts({
   paymentTerms,
   paymentSchedule: initialPaymentSchedule,
   paymentMethods: initialPaymentMethods,
+  contractType = "contract",
   onSubmit,
   onBack,
 }: {
@@ -6006,6 +6565,7 @@ function Step4SetAmounts({
   paymentTerms?: string;
   paymentSchedule?: "upfront" | "partial" | "full" | "split" | "incremental";
   paymentMethods?: string[];
+  contractType?: "contract" | "proposal";
   onSubmit: (
     deposit: string, 
     total: string, 
@@ -6070,6 +6630,9 @@ function Step4SetAmounts({
   const [paymentAfterSigningDue, setPaymentAfterSigningDue] = useState<"upon_signing" | "within_3_days" | "within_7_days" | "within_14_days" | "custom">("upon_signing");
   const [customPaymentDate, setCustomPaymentDate] = useState("");
   
+  const { toast } = useToast();
+  const isProposal = contractType === "proposal";
+  
   // Update payment schedule when compensation type changes
   useEffect(() => {
     if (!initialPaymentSchedule && compensationType) {
@@ -6078,8 +6641,6 @@ function Step4SetAmounts({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compensationType, initialPaymentSchedule]);
-
-  const { toast } = useToast();
 
   // Auto-configure payment schedule when total and deposit amounts are entered
   useEffect(() => {
@@ -6342,7 +6903,7 @@ function Step4SetAmounts({
       
       toast({
         title: "Payment Method Added",
-        description: `${selectedPaymentMethod} has been added and will be included in your contract.`,
+        description: `${selectedPaymentMethod} has been added and will be included in your ${isProposal ? "proposal" : "contract"}.`,
       });
       
       setShowPaymentModal(false);
@@ -6360,19 +6921,42 @@ function Step4SetAmounts({
             <DollarSign className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-white">Payment & Compensation</h2>
-            <p className="text-indigo-100 text-sm">Set up all payment amounts, schedules, and methods</p>
+            <h2 className="text-2xl font-bold text-white">
+              {isProposal ? "Compensation Offer" : "Payment & Compensation"}
+            </h2>
+            <p className="text-indigo-100 text-sm">
+              {isProposal 
+                ? "Set up the compensation amounts you're offering to the client"
+                : "Set up all payment amounts, schedules, and methods"}
+            </p>
           </div>
         </div>
       </div>
 
       <Card className="bg-slate-900 border-slate-700 shadow-xl">
         <CardContent className="p-6 space-y-6">
+        {/* Proposal Notice */}
+        {isProposal && (
+          <div className="p-4 bg-indigo-900/20 border border-indigo-700/50 rounded-lg">
+            <div className="flex items-start gap-3">
+              <Handshake className="h-5 w-5 text-indigo-400 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">Proposal Contract</p>
+                <p className="text-xs text-slate-300">
+                  You are offering compensation to the client. This is a proposal where you will pay them, not the other way around.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Compensation Type Display */}
         {compensationType && compensationType !== "no_compensation" && (
           <div className="p-4 rounded-lg bg-indigo-900/20 border border-indigo-500/30">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wide">Compensation Type</span>
+              <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wide">
+                {isProposal ? "Compensation Type" : "Payment Type"}
+              </span>
             </div>
             <p className="text-sm text-white font-medium">
               {compensationType === "fixed_amount" && "Fixed Amount"}
@@ -6389,7 +6973,7 @@ function Step4SetAmounts({
         <div className="space-y-2">
               <Label className="text-slate-300 font-semibold flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-indigo-400" />
-                Total Contract Amount
+                {isProposal ? "Total Compensation Amount" : "Total Contract Amount"}
                 <span className="text-red-400">*</span>
               </Label>
               <div className="relative">
@@ -6405,13 +6989,17 @@ function Step4SetAmounts({
                   required
                 />
               </div>
-              <p className="text-xs text-slate-500">Enter the total amount for this contract</p>
+              <p className="text-xs text-slate-500">
+                {isProposal 
+                  ? "Enter the total compensation amount you're offering"
+                  : "Enter the total amount for this contract"}
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label className="text-slate-300 font-semibold flex items-center gap-2">
                 <CreditCard className="h-4 w-4 text-indigo-400" />
-                Deposit Amount (Optional)
+                {isProposal ? "Initial Payment Amount (Optional)" : "Deposit Amount (Optional)"}
               </Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -6425,17 +7013,25 @@ function Step4SetAmounts({
             placeholder="0.00"
           />
         </div>
-              <p className="text-xs text-slate-500">Initial payment or deposit (if applicable)</p>
+              <p className="text-xs text-slate-500">
+                {isProposal 
+                  ? "Optional: Initial payment amount you'll pay upfront"
+                  : "Initial payment or deposit (if applicable)"}
+              </p>
               {deposit && total && parseFloat(deposit) > 0 && parseFloat(total) > 0 && (
                 <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-400">Balance Due:</span>
+                    <span className="text-slate-400">
+                      {isProposal ? "Remaining Balance:" : "Balance Due:"}
+                    </span>
                     <span className="text-white font-semibold">
                       ${(parseFloat(total) - parseFloat(deposit)).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm mt-1">
-                    <span className="text-slate-400">Deposit %:</span>
+                    <span className="text-slate-400">
+                      {isProposal ? "Initial Payment %:" : "Deposit %:"}
+                    </span>
                     <span className="text-indigo-400 font-semibold">
                       {((parseFloat(deposit) / parseFloat(total)) * 100).toFixed(1)}%
                     </span>
@@ -6501,7 +7097,7 @@ function Step4SetAmounts({
             <div className="space-y-2">
               <Label className="text-slate-300 font-semibold flex items-center gap-2">
                 <CreditCard className="h-4 w-4 text-indigo-400" />
-                Deposit Amount (Optional)
+                {isProposal ? "Initial Payment Amount (Optional)" : "Deposit Amount (Optional)"}
               </Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -6515,6 +7111,11 @@ function Step4SetAmounts({
                   placeholder="0.00"
                 />
               </div>
+              <p className="text-xs text-slate-500">
+                {isProposal 
+                  ? "Optional: Initial payment amount you'll pay upfront"
+                  : "Initial payment or deposit (if applicable)"}
+              </p>
             </div>
           </>
         )}
@@ -6526,7 +7127,7 @@ function Step4SetAmounts({
               <div className="flex items-center justify-between">
                 <Label className="text-slate-300 font-semibold flex items-center gap-2">
                   <Target className="h-4 w-4 text-indigo-400" />
-                  Milestone Payments
+                  {isProposal ? "Milestone Compensation" : "Milestone Payments"}
                 </Label>
                 <Button
                   type="button"
@@ -6618,7 +7219,9 @@ function Step4SetAmounts({
                   ))}
                   <div className="p-3 rounded-lg bg-indigo-900/20 border border-indigo-500/30">
                     <div className="flex justify-between items-center">
-                      <span className="text-slate-300 font-medium">Total Amount:</span>
+                      <span className="text-slate-300 font-medium">
+                        {isProposal ? "Total Compensation:" : "Total Amount:"}
+                      </span>
                       <span className="text-xl font-bold text-indigo-400">
                         ${milestones.reduce((sum, m) => sum + (parseFloat(m.amount) || 0), 0).toFixed(2)}
                       </span>
@@ -6658,19 +7261,25 @@ function Step4SetAmounts({
                   <div className="flex items-center gap-2">
                     <Label htmlFor="requirePaymentAfterSigningHourly" className="text-slate-300 font-semibold cursor-pointer flex items-center gap-2">
                       <CreditCard className="h-4 w-4 text-indigo-400" />
-                      Require Payment After Signing
+                      {isProposal ? "Require Initial Payment After Signing" : "Require Payment After Signing"}
                     </Label>
                   </div>
                   <p className="text-xs text-slate-500">
                     {requirePaymentAfterSigning 
-                      ? "Client must make a payment after signing this contract."
-                      : "No payment required immediately after signing. Payment will be due based on the payment schedule."}
+                      ? (isProposal 
+                          ? "You will make an initial payment after the proposal is accepted."
+                          : "Client must make a payment after signing this contract.")
+                      : (isProposal
+                          ? "No initial payment required immediately after signing. Compensation will be due based on the compensation schedule."
+                          : "No payment required immediately after signing. Payment will be due based on the payment schedule.")}
                   </p>
                   
                   {requirePaymentAfterSigning && (
                     <div className="space-y-3 pl-6 border-l-2 border-indigo-500/30 mt-3">
                       <div className="space-y-2">
-                        <Label className="text-slate-400 text-sm">Payment Amount After Signing</Label>
+                        <Label className="text-slate-400 text-sm">
+                          {isProposal ? "Initial Payment Amount After Signing" : "Payment Amount After Signing"}
+                        </Label>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
@@ -6704,16 +7313,20 @@ function Step4SetAmounts({
                       </div>
                       
                       <div className="space-y-2">
-                        <Label className="text-slate-400 text-sm">Payment Due Date</Label>
+                        <Label className="text-slate-400 text-sm">
+                          {isProposal ? "Initial Payment Due Date" : "Payment Due Date"}
+                        </Label>
                         <select
                           value={paymentAfterSigningDue}
                           onChange={(e) => setPaymentAfterSigningDue(e.target.value as any)}
                           className="w-full bg-slate-700/50 border-slate-600 text-white rounded-md px-3 py-2 text-sm"
                         >
-                          <option value="upon_signing">Upon signing this agreement</option>
-                          <option value="within_3_days">Within 3 business days of signing</option>
-                          <option value="within_7_days">Within 7 business days of signing</option>
-                          <option value="within_14_days">Within 14 business days of signing</option>
+                          <option value="upon_signing">
+                            {isProposal ? "Upon proposal acceptance" : "Upon signing this agreement"}
+                          </option>
+                          <option value="within_3_days">Within 3 business days {isProposal ? "of acceptance" : "of signing"}</option>
+                          <option value="within_7_days">Within 7 business days {isProposal ? "of acceptance" : "of signing"}</option>
+                          <option value="within_14_days">Within 14 business days {isProposal ? "of acceptance" : "of signing"}</option>
                           <option value="custom">Custom date</option>
                         </select>
                         {paymentAfterSigningDue === "custom" && (
@@ -6738,7 +7351,7 @@ function Step4SetAmounts({
             <div className="flex items-center justify-between">
               <Label className="text-slate-300 font-semibold flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-indigo-400" />
-                Payment Schedule
+                {isProposal ? "Compensation Schedule" : "Payment Schedule"}
               </Label>
               {compensationType && compensationType !== "no_compensation" && (
                 <span className="text-xs text-slate-500">
@@ -6753,11 +7366,36 @@ function Step4SetAmounts({
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {[
-                { value: "upfront", label: "Pay Upfront", icon: CreditCard, desc: "Full payment upon signing" },
-                { value: "partial", label: "Partial Payment", icon: DollarSign, desc: "Deposit + balance later" },
-                { value: "full", label: "Pay in Full", icon: CheckCircle2, desc: "Payment upon completion" },
-                { value: "split", label: "Split Payments", icon: RefreshCw, desc: "Multiple installments" },
-                { value: "incremental", label: "Incremental", icon: Target, desc: "Pay as you go" },
+                { 
+                  value: "upfront", 
+                  label: isProposal ? "Pay Upfront" : "Pay Upfront", 
+                  icon: CreditCard, 
+                  desc: isProposal ? "Full compensation upon acceptance" : "Full payment upon signing" 
+                },
+                { 
+                  value: "partial", 
+                  label: isProposal ? "Partial Compensation" : "Partial Payment", 
+                  icon: DollarSign, 
+                  desc: isProposal ? "Initial payment + balance later" : "Deposit + balance later" 
+                },
+                { 
+                  value: "full", 
+                  label: isProposal ? "Pay in Full" : "Pay in Full", 
+                  icon: CheckCircle2, 
+                  desc: isProposal ? "Compensation upon completion" : "Payment upon completion" 
+                },
+                { 
+                  value: "split", 
+                  label: isProposal ? "Split Compensation" : "Split Payments", 
+                  icon: RefreshCw, 
+                  desc: "Multiple installments" 
+                },
+                { 
+                  value: "incremental", 
+                  label: "Incremental", 
+                  icon: Target, 
+                  desc: isProposal ? "Pay as work progresses" : "Pay as you go" 
+                },
               ].map((option) => {
                 const Icon = option.icon;
                 const isRecommended = compensationType && compensationType !== "no_compensation" && (
@@ -6824,14 +7462,14 @@ function Step4SetAmounts({
                   </div>
                   <div>
                     <DialogTitle className="text-xl font-bold text-white">
-                      Configure {paymentSchedule === "upfront" && "Pay Upfront"}
-                      {paymentSchedule === "partial" && "Partial Payment"}
-                      {paymentSchedule === "full" && "Pay in Full"}
-                      {paymentSchedule === "split" && "Split Payments"}
-                      {paymentSchedule === "incremental" && "Incremental Payments"}
+                      Configure {paymentSchedule === "upfront" && (isProposal ? "Pay Upfront" : "Pay Upfront")}
+                      {paymentSchedule === "partial" && (isProposal ? "Partial Compensation" : "Partial Payment")}
+                      {paymentSchedule === "full" && (isProposal ? "Pay in Full" : "Pay in Full")}
+                      {paymentSchedule === "split" && (isProposal ? "Split Compensation" : "Split Payments")}
+                      {paymentSchedule === "incremental" && (isProposal ? "Incremental Compensation" : "Incremental Payments")}
                     </DialogTitle>
                     <DialogDescription className="text-slate-400 text-sm mt-1">
-                      Set up the details for this payment schedule
+                      Set up the details for this {isProposal ? "compensation" : "payment"} schedule
                     </DialogDescription>
                   </div>
                 </div>
@@ -6844,18 +7482,28 @@ function Step4SetAmounts({
                     <span className="text-indigo-400 text-lg">💡</span>
                     <div>
                       <p className="text-sm font-medium text-indigo-200 mb-1">
-                        {paymentSchedule === "upfront" && "Full Payment Upfront"}
-                        {paymentSchedule === "partial" && "Partial Payment with Deposit"}
-                        {paymentSchedule === "full" && "Payment Upon Completion"}
+                        {paymentSchedule === "upfront" && (isProposal ? "Full Compensation Upfront" : "Full Payment Upfront")}
+                        {paymentSchedule === "partial" && (isProposal ? "Partial Compensation with Initial Payment" : "Partial Payment with Deposit")}
+                        {paymentSchedule === "full" && (isProposal ? "Compensation Upon Completion" : "Payment Upon Completion")}
                         {paymentSchedule === "split" && "Multiple Installments"}
-                        {paymentSchedule === "incremental" && "Pay as You Go"}
+                        {paymentSchedule === "incremental" && (isProposal ? "Pay as Work Progresses" : "Pay as You Go")}
                       </p>
                       <p className="text-xs text-indigo-300/80 leading-relaxed">
-                        {paymentSchedule === "upfront" && "Client pays the full contract amount before work begins. Specify when payment is due (e.g., upon signing, within X days)."}
-                        {paymentSchedule === "partial" && "Client pays a deposit upfront, then the balance later. Configure the deposit percentage/amount and when the balance is due."}
-                        {paymentSchedule === "full" && "Client pays the full amount after work is completed. Set the completion criteria and payment due date."}
-                        {paymentSchedule === "split" && "Divide the total into multiple payments. Set the number of payments, amounts, and due dates for each installment."}
-                        {paymentSchedule === "incremental" && "Client pays based on progress or time. Set payment frequency (weekly, monthly, etc.) and when payments begin."}
+                        {paymentSchedule === "upfront" && (isProposal 
+                          ? "You will pay the full compensation amount before work begins. Specify when payment is due (e.g., upon proposal acceptance, within X days)."
+                          : "Client pays the full contract amount before work begins. Specify when payment is due (e.g., upon signing, within X days).")}
+                        {paymentSchedule === "partial" && (isProposal
+                          ? "You will make an initial payment upfront, then pay the balance later. Configure the initial payment percentage/amount and when the balance is due."
+                          : "Client pays a deposit upfront, then the balance later. Configure the deposit percentage/amount and when the balance is due.")}
+                        {paymentSchedule === "full" && (isProposal
+                          ? "You will pay the full compensation amount after work is completed. Set the completion criteria and compensation due date."
+                          : "Client pays the full amount after work is completed. Set the completion criteria and payment due date.")}
+                        {paymentSchedule === "split" && (isProposal
+                          ? "Divide the total compensation into multiple payments. Set the number of payments, amounts, and due dates for each installment."
+                          : "Divide the total into multiple payments. Set the number of payments, amounts, and due dates for each installment.")}
+                        {paymentSchedule === "incremental" && (isProposal
+                          ? "You will pay based on progress or time. Set payment frequency (weekly, monthly, etc.) and when payments begin."
+                          : "Client pays based on progress or time. Set payment frequency (weekly, monthly, etc.) and when payments begin.")}
                       </p>
                     </div>
                   </div>
@@ -6901,14 +7549,16 @@ function Step4SetAmounts({
                 {paymentSchedule === "partial" && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Deposit Amount</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Initial Payment Amount" : "Deposit Amount"}
+                      </Label>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                           <Input
                             type="number"
                             step="0.01"
-                            placeholder="Deposit amount"
+                            placeholder={isProposal ? "Initial payment amount" : "Deposit amount"}
                             value={deposit}
                             onChange={(e) => setDeposit(e.target.value)}
                             className="pl-8 bg-slate-800 border-slate-600 text-white"
@@ -6935,19 +7585,23 @@ function Step4SetAmounts({
                       </div>
                       {deposit && total && (
                         <p className="text-xs text-slate-500">
-                          Deposit: ${parseFloat(deposit).toFixed(2)} ({((parseFloat(deposit) / parseFloat(total)) * 100).toFixed(1)}%) | 
-                          Balance: ${(parseFloat(total) - parseFloat(deposit)).toFixed(2)}
+                          {isProposal ? "Initial Payment" : "Deposit"}: ${parseFloat(deposit).toFixed(2)} ({((parseFloat(deposit) / parseFloat(total)) * 100).toFixed(1)}%) | 
+                          {isProposal ? " Remaining Balance" : " Balance"}: ${(parseFloat(total) - parseFloat(deposit)).toFixed(2)}
                         </p>
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Deposit Due Date</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Initial Payment Due Date" : "Deposit Due Date"}
+                      </Label>
                       <select
                         value={scheduleConfig.firstPaymentDate || "upon_signing"}
                         onChange={(e) => setScheduleConfig({ ...scheduleConfig, firstPaymentDate: e.target.value })}
                         className="w-full bg-slate-800 border-slate-600 text-white rounded-md px-3 py-2"
                       >
-                        <option value="upon_signing">Upon signing this agreement</option>
+                        <option value="upon_signing">
+                          {isProposal ? "Upon proposal acceptance" : "Upon signing this agreement"}
+                        </option>
                         <option value="within_3_days">Within 3 business days</option>
                         <option value="within_7_days">Within 7 business days</option>
                         <option value="custom">Custom date</option>
@@ -6962,7 +7616,9 @@ function Step4SetAmounts({
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Balance Due Date</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Remaining Balance Due Date" : "Balance Due Date"}
+                      </Label>
                       <select
                         value={scheduleConfig.balanceDueDate || "upon_completion"}
                         onChange={(e) => setScheduleConfig({ ...scheduleConfig, balanceDueDate: e.target.value })}
@@ -6991,7 +7647,9 @@ function Step4SetAmounts({
                 {paymentSchedule === "full" && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Payment Due Date</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Compensation Due Date" : "Payment Due Date"}
+                      </Label>
                       <select
                         value={scheduleConfig.balanceDueDate || "upon_completion"}
                         onChange={(e) => setScheduleConfig({ ...scheduleConfig, balanceDueDate: e.target.value })}
@@ -7015,7 +7673,9 @@ function Step4SetAmounts({
                     </div>
                     <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-300">Total Amount Due:</span>
+                        <span className="text-slate-300">
+                          {isProposal ? "Total Compensation Due:" : "Total Amount Due:"}
+                        </span>
                         <span className="text-xl font-bold text-indigo-400">${parseFloat(total || "0").toFixed(2)}</span>
                       </div>
                     </div>
@@ -7043,18 +7703,26 @@ function Step4SetAmounts({
                         }}
                         className="bg-slate-800 border-slate-600 text-white"
                       />
-                      <p className="text-xs text-slate-500">Divide the total into 2-12 equal or custom payments</p>
+                      <p className="text-xs text-slate-500">
+                        {isProposal 
+                          ? "Divide the total compensation into 2-12 equal or custom payments"
+                          : "Divide the total into 2-12 equal or custom payments"}
+                      </p>
                     </div>
                     {scheduleConfig.numberOfPayments && scheduleConfig.numberOfPayments > 0 && (
                       <div className="space-y-3">
-                        <Label className="text-slate-300 font-medium">Payment Schedule</Label>
+                        <Label className="text-slate-300 font-medium">
+                          {isProposal ? "Compensation Schedule" : "Payment Schedule"}
+                        </Label>
                         {Array.from({ length: scheduleConfig.numberOfPayments }).map((_, index) => {
                           const payment = scheduleConfig.paymentDates?.[index] || { date: "", amount: "", percentage: "" };
                           const equalAmount = (parseFloat(total || "0") / (scheduleConfig.numberOfPayments || 2)).toFixed(2);
                           return (
                             <div key={index} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 space-y-2">
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm font-medium text-indigo-400">Payment {index + 1}</span>
+                                <span className="text-sm font-medium text-indigo-400">
+                                  {isProposal ? "Compensation" : "Payment"} {index + 1}
+                                </span>
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div className="relative">
@@ -7115,7 +7783,7 @@ function Step4SetAmounts({
                           </div>
                           {scheduleConfig.paymentDates && scheduleConfig.paymentDates.reduce((sum, p) => sum + (parseFloat(p.amount || "0")), 0) !== parseFloat(total || "0") && (
                             <p className="text-xs text-amber-400 mt-1">
-                              Total doesn&apos;t match contract amount. Adjust payments to equal ${parseFloat(total || "0").toFixed(2)}
+                              Total doesn&apos;t match {isProposal ? "compensation" : "contract"} amount. Adjust payments to equal ${parseFloat(total || "0").toFixed(2)}
                             </p>
                           )}
                         </div>
@@ -7128,7 +7796,9 @@ function Step4SetAmounts({
                 {paymentSchedule === "incremental" && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Payment Frequency</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Compensation Frequency" : "Payment Frequency"}
+                      </Label>
                       <select
                         value={scheduleConfig.paymentFrequency || "monthly"}
                         onChange={(e) => setScheduleConfig({ ...scheduleConfig, paymentFrequency: e.target.value as any })}
@@ -7141,7 +7811,9 @@ function Step4SetAmounts({
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">First Payment Date</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "First Compensation Date" : "First Payment Date"}
+                      </Label>
                       <Input
                         type="date"
                         value={scheduleConfig.firstPaymentDate || ""}
@@ -7150,7 +7822,9 @@ function Step4SetAmounts({
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Payment Amount per Period</Label>
+                      <Label className="text-slate-300 font-medium">
+                        {isProposal ? "Compensation Amount per Period" : "Payment Amount per Period"}
+                      </Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                         <Input
@@ -7166,7 +7840,7 @@ function Step4SetAmounts({
                         />
                       </div>
                       <p className="text-xs text-slate-500">
-                        Client will pay this amount {scheduleConfig.paymentFrequency === "weekly" && "every week"}
+                        {isProposal ? "You will pay" : "Client will pay"} this amount {scheduleConfig.paymentFrequency === "weekly" && "every week"}
                         {scheduleConfig.paymentFrequency === "biweekly" && "every 2 weeks"}
                         {scheduleConfig.paymentFrequency === "monthly" && "every month"}
                         {scheduleConfig.paymentFrequency === "quarterly" && "every 3 months"}
@@ -7190,8 +7864,8 @@ function Step4SetAmounts({
                   onClick={() => {
                     setShowScheduleConfig(false);
                     toast({
-                      title: "Payment Schedule Configured",
-                      description: `${paymentSchedule} schedule has been configured and will be included in your contract.`,
+                      title: isProposal ? "Compensation Schedule Configured" : "Payment Schedule Configured",
+                      description: `${paymentSchedule} schedule has been configured and will be included in your ${isProposal ? "proposal" : "contract"}.`,
                     });
                   }}
                   className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-lg shadow-indigo-500/20"
@@ -7207,7 +7881,7 @@ function Step4SetAmounts({
           <div className="space-y-3">
             <Label className="text-slate-300 font-semibold flex items-center gap-2">
               <CreditCard className="h-4 w-4 text-indigo-400" />
-              Accepted Payment Methods
+              {isProposal ? "Payment Methods (How you'll pay)" : "Accepted Payment Methods"}
             </Label>
             <div className="flex flex-wrap gap-3">
               {["Cash", "Check", "Bank Transfer", "Credit Card", "PayPal", "Venmo", "Zelle", "Cash App", "Wire Transfer"].map((method: string) => {
@@ -7234,7 +7908,11 @@ function Step4SetAmounts({
               })}
             </div>
             {paymentMethods.length === 0 && (
-              <p className="text-xs text-slate-500">Optional: Select accepted payment methods</p>
+              <p className="text-xs text-slate-500">
+                {isProposal 
+                  ? "Optional: Select payment methods you'll use to provide compensation"
+                  : "Optional: Select accepted payment methods"}
+              </p>
             )}
             {paymentMethods.length > 0 && (
               <div className="mt-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700">
@@ -7518,7 +8196,495 @@ function Step4SetAmounts({
   );
 }
 
-function Step5Preview({
+function Step5Styling({
+  data,
+  branding,
+  setBranding,
+  onSubmit,
+  onBack,
+}: {
+  data: ContractData;
+  branding: any;
+  setBranding: (branding: any) => void;
+  onSubmit: () => void;
+  onBack: () => void;
+}) {
+  const [subscriptionTier, setSubscriptionTier] = useState<"free" | "starter" | "pro" | "premium">("free");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Fetch subscription tier
+    fetch("/api/account")
+      .then(res => res.json())
+      .then(result => {
+        if (result.company) {
+          setSubscriptionTier(result.company.subscriptionTier || "free");
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const hasCustomBranding = subscriptionTier === "pro" || subscriptionTier === "premium";
+  const hasBasicStyling = subscriptionTier === "starter" || hasCustomBranding;
+
+  // Complete style presets with all settings - one click applies everything
+  const tierPresets = {
+    free: [
+      { 
+        name: "Standard", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+    ],
+    starter: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+    pro: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Creative", 
+        icon: "🎨",
+        colors: { primary: "#7c3aed", secondary: "#8b5cf6", accent: "#a78bfa" }, 
+        font: "'Helvetica Neue', sans-serif",
+        headerStyle: "centered" as const,
+        borderStyle: "dashed" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+    premium: [
+      { 
+        name: "Corporate", 
+        icon: "🏢",
+        colors: { primary: "#1e40af", secondary: "#3b82f6", accent: "#60a5fa" }, 
+        font: "'Times New Roman', serif",
+        headerStyle: "centered" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Modern", 
+        icon: "✨",
+        colors: { primary: "#059669", secondary: "#10b981", accent: "#34d399" }, 
+        font: "Calibri, sans-serif",
+        headerStyle: "left" as const,
+        borderStyle: "solid" as const,
+      },
+      { 
+        name: "Creative", 
+        icon: "🎨",
+        colors: { primary: "#7c3aed", secondary: "#8b5cf6", accent: "#a78bfa" }, 
+        font: "'Helvetica Neue', sans-serif",
+        headerStyle: "centered" as const,
+        borderStyle: "dashed" as const,
+      },
+      { 
+        name: "Classic", 
+        icon: "📜",
+        colors: { primary: "#374151", secondary: "#6b7280", accent: "#9ca3af" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+      { 
+        name: "Luxury", 
+        icon: "💎",
+        colors: { primary: "#92400e", secondary: "#d97706", accent: "#f59e0b" }, 
+        font: "Georgia, serif",
+        headerStyle: "centered" as const,
+        borderStyle: "double" as const,
+      },
+    ],
+  };
+
+  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
+
+  const applyPreset = (preset: any, index: number) => {
+    setSelectedPreset(index);
+    setBranding({
+      ...branding,
+      primaryColor: preset.colors.primary,
+      secondaryColor: preset.colors.secondary,
+      accentColor: preset.colors.accent || preset.colors.secondary,
+      fontFamily: preset.font,
+      headerStyle: preset.headerStyle,
+      borderStyle: preset.borderStyle,
+      showBorder: preset.borderStyle !== "none",
+    });
+  };
+
+  if (loading) {
+    return (
+      <Card className="border-2 border-slate-700">
+        <CardContent className="p-8 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-2 border-indigo-500/30 bg-slate-800/95">
+        <CardHeader className="bg-gradient-to-r from-indigo-900/20 to-purple-900/20 border-b border-slate-700">
+          <CardTitle className="text-2xl font-bold text-white flex items-center gap-2">
+            <FileType className="h-6 w-6 text-indigo-400" />
+            Customize Contract Style
+          </CardTitle>
+          <CardDescription className="text-slate-400 mt-1">
+            Choose how your contract will look on paper - colors, fonts, and layout
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 space-y-6">
+          {/* Tier Info */}
+          <div className={`p-4 rounded-lg border ${
+            subscriptionTier === "free" 
+              ? "bg-slate-700/30 border-slate-600" 
+              : subscriptionTier === "starter"
+              ? "bg-blue-900/20 border-blue-700/50"
+              : "bg-indigo-900/20 border-indigo-700/50"
+          }`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Current Plan: <span className="text-indigo-300 capitalize">{subscriptionTier}</span>
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {subscriptionTier === "free" 
+                    ? "Upgrade to Starter or Pro for more styling options"
+                    : subscriptionTier === "starter"
+                    ? "Upgrade to Pro for full custom branding (colors, logos, watermarks)"
+                    : "You have access to all styling features"}
+                </p>
+              </div>
+              {subscriptionTier !== "premium" && (
+                <Link href="/dashboard/subscription">
+                  <Button size="sm" variant="outline" className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/30">
+                    Upgrade Plan
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* Style Presets - Large Visual Cards */}
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-4">Choose Your Style (One Click)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tierPresets[subscriptionTier].map((preset, idx) => {
+                const isSelected = selectedPreset === idx;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => applyPreset(preset, idx)}
+                    className={`relative p-6 rounded-xl border-2 transition-all group text-left ${
+                      isSelected
+                        ? "border-indigo-500 bg-indigo-900/20 ring-4 ring-indigo-500/30"
+                        : "border-slate-700 bg-slate-800/50 hover:border-indigo-500/50 hover:bg-slate-700/50"
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="absolute top-3 right-3">
+                        <CheckCircle2 className="h-6 w-6 text-indigo-400" />
+                      </div>
+                    )}
+                    
+                    {/* Preview Card */}
+                    <div 
+                      className="mb-4 p-4 rounded-lg border-2 bg-white shadow-lg"
+                      style={{ 
+                        borderColor: preset.colors.primary,
+                        borderStyle: preset.borderStyle,
+                        fontFamily: preset.font,
+                      }}
+                    >
+                      <div 
+                        className="mb-3 pb-2 border-b-2"
+                        style={{ 
+                          borderColor: preset.colors.primary,
+                          textAlign: preset.headerStyle === "centered" ? "center" : preset.headerStyle,
+                        }}
+                      >
+                        <h4 
+                          className="text-lg font-bold mb-1"
+                          style={{ color: preset.colors.primary }}
+                        >
+                          {data.title || "Contract Title"}
+                        </h4>
+                        <p 
+                          className="text-xs"
+                          style={{ color: preset.colors.secondary }}
+                        >
+                          Professional Document
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="h-1 bg-slate-200 rounded"></div>
+                        <div className="h-1 bg-slate-200 rounded w-3/4"></div>
+                        <div className="h-1 bg-slate-200 rounded w-5/6"></div>
+                      </div>
+                    </div>
+
+                    {/* Style Info */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-2xl">{preset.icon}</span>
+                          <p className="text-base font-semibold text-white">
+                            {preset.name}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full border border-slate-600" 
+                            style={{ backgroundColor: preset.colors.primary }}
+                          />
+                          <div 
+                            className="w-3 h-3 rounded-full border border-slate-600" 
+                            style={{ backgroundColor: preset.colors.secondary }}
+                          />
+                          {preset.colors.accent && (
+                            <div 
+                              className="w-3 h-3 rounded-full border border-slate-600" 
+                              style={{ backgroundColor: preset.colors.accent }}
+                            />
+                          )}
+                          <span className="text-xs text-slate-400 ml-2" style={{ fontFamily: preset.font }}>
+                            {preset.font.split(",")[0].replace(/'/g, "")}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom Options (Pro+ only) - Collapsible */}
+          {hasCustomBranding && (
+            <details className="pt-4 border-t border-slate-700">
+              <summary className="cursor-pointer text-lg font-semibold text-white flex items-center gap-2 hover:text-indigo-300 transition-colors">
+                <Zap className="h-5 w-5 text-indigo-400" />
+                Advanced Customization (Optional)
+              </summary>
+              <div className="space-y-4 mt-4 pt-4 border-t border-slate-700">
+              
+              {/* Colors */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Primary Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.primaryColor}
+                      onChange={(e) => setBranding?.({ ...branding, primaryColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.primaryColor}
+                      onChange={(e) => setBranding?.({ ...branding, primaryColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Secondary Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.secondaryColor}
+                      onChange={(e) => setBranding?.({ ...branding, secondaryColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.secondaryColor}
+                      onChange={(e) => setBranding?.({ ...branding, secondaryColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm text-slate-300 mb-2 block">Accent Color</Label>
+                  <div className="flex gap-2">
+                    <input
+                      type="color"
+                      value={branding.accentColor}
+                      onChange={(e) => setBranding?.({ ...branding, accentColor: e.target.value })}
+                      className="w-12 h-10 rounded border border-slate-600 cursor-pointer"
+                    />
+                    <Input
+                      value={branding.accentColor}
+                      onChange={(e) => setBranding?.({ ...branding, accentColor: e.target.value })}
+                      className="flex-1 bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Font */}
+              <div>
+                <Label className="text-sm text-slate-300 mb-2 block">Font Family</Label>
+                <select
+                  value={branding.fontFamily}
+                  onChange={(e) => setBranding?.({ ...branding, fontFamily: e.target.value })}
+                  className="w-full h-10 rounded border border-slate-600 bg-slate-700/50 px-3 text-white"
+                >
+                  <option value="Georgia, serif">Georgia</option>
+                  <option value="'Times New Roman', serif">Times New Roman</option>
+                  <option value="Calibri, sans-serif">Calibri</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                  <option value="'Helvetica Neue', sans-serif">Helvetica Neue</option>
+                </select>
+              </div>
+
+              {/* Layout */}
+              <div>
+                <Label className="text-sm text-slate-300 mb-2 block">Header Alignment</Label>
+                <div className="flex gap-2">
+                  {(["left", "centered", "right"] as const).map((align) => (
+                    <button
+                      key={align}
+                      onClick={() => setBranding?.({ ...branding, headerStyle: align })}
+                      className={`flex-1 py-2 rounded text-sm ${
+                        branding.headerStyle === align
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                      }`}
+                    >
+                      {align === "centered" ? "Center" : align.charAt(0).toUpperCase() + align.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              </div>
+            </details>
+          )}
+
+          {/* Selected Style Preview */}
+          {selectedPreset !== null && (
+            <div className="pt-4 border-t border-slate-700">
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-sm font-semibold text-white">Selected Style Preview</Label>
+                <Badge variant="outline" className="border-indigo-600 text-indigo-300">
+                  Active
+                </Badge>
+              </div>
+              <div 
+                className="p-8 rounded-xl border-2 shadow-2xl bg-white"
+                style={{ 
+                  borderColor: branding.primaryColor,
+                  borderStyle: branding.borderStyle,
+                  fontFamily: branding.fontFamily,
+                }}
+              >
+                <div 
+                  className="mb-6 pb-4 border-b-2"
+                  style={{ 
+                    borderColor: branding.primaryColor,
+                    textAlign: branding.headerStyle === "centered" ? "center" : branding.headerStyle,
+                  }}
+                >
+                  <h2 
+                    className="text-2xl font-bold mb-2"
+                    style={{ color: branding.primaryColor }}
+                  >
+                    {data.title || "Contract Title"}
+                  </h2>
+                  <p 
+                    className="text-base"
+                    style={{ color: branding.secondaryColor }}
+                  >
+                    Professional Contract Document
+                  </p>
+                </div>
+                <div className="space-y-3 text-slate-700" style={{ fontFamily: branding.fontFamily }}>
+                  <p className="leading-relaxed">
+                    This is a preview of how your contract will appear when printed or viewed as a PDF. 
+                    All styling including colors, fonts, and layout will be applied automatically.
+                  </p>
+                  <div className="pt-4 border-t border-slate-200">
+                    <p className="text-sm text-slate-500">
+                      ✓ Colors applied • ✓ Font selected • ✓ Layout configured
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Navigation */}
+      <div className="flex justify-between">
+        <Button 
+          variant="outline" 
+          onClick={onBack}
+          className="border-slate-600 text-slate-300 hover:bg-slate-700"
+        >
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
+        <Button 
+          onClick={onSubmit}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white"
+        >
+          Continue to Review
+          <ChevronRight className="h-4 w-4 ml-2" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Step6Preview({
   data,
   onSubmit,
   onBack,
@@ -7719,7 +8885,7 @@ function Step5Preview({
             <CardHeader className="bg-gradient-to-r from-slate-800 to-slate-700 border-b border-slate-700">
               <CardTitle className="text-white flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-indigo-400" />
-                Compensation & Payment
+                {data.contractType === "proposal" ? "Compensation Offer" : "Compensation & Payment"}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
@@ -7738,7 +8904,9 @@ function Step5Preview({
                     
                     {parseFloat(data.totalAmount || "0") > 0 && (
                       <div className="flex justify-between items-center py-2 border-t border-indigo-500/20">
-                        <span className="text-slate-300">Total Amount:</span>
+                        <span className="text-slate-300">
+                          {data.contractType === "proposal" ? "Total Compensation:" : "Total Amount:"}
+                        </span>
                         <span className="text-2xl font-bold text-indigo-400">
                           ${parseFloat(data.totalAmount).toFixed(2)}
                         </span>
@@ -7747,7 +8915,9 @@ function Step5Preview({
                     
                 {parseFloat(data.depositAmount || "0") > 0 && (
                       <div className="flex justify-between items-center py-2 border-t border-indigo-500/20">
-                        <span className="text-slate-300">Deposit:</span>
+                        <span className="text-slate-300">
+                          {data.contractType === "proposal" ? "Initial Payment:" : "Deposit:"}
+                        </span>
                         <span className="text-xl font-semibold text-white">
                           ${parseFloat(data.depositAmount).toFixed(2)}
                         </span>
@@ -7756,7 +8926,9 @@ function Step5Preview({
                     
                     {parseFloat(data.depositAmount || "0") > 0 && parseFloat(data.totalAmount || "0") > 0 && (
                       <div className="flex justify-between items-center py-2 border-t border-indigo-500/20">
-                        <span className="text-slate-300">Balance Due:</span>
+                        <span className="text-slate-300">
+                          {data.contractType === "proposal" ? "Remaining Balance:" : "Balance Due:"}
+                        </span>
                         <span className="text-lg font-semibold text-green-400">
                           ${(parseFloat(data.totalAmount) - parseFloat(data.depositAmount)).toFixed(2)}
                         </span>
@@ -7765,20 +8937,24 @@ function Step5Preview({
 
                     {paymentSchedule && (
                       <div className="mt-3 pt-3 border-t border-indigo-500/20">
-                        <span className="text-xs text-slate-400 uppercase tracking-wide">Payment Schedule</span>
+                        <span className="text-xs text-slate-400 uppercase tracking-wide">
+                          {data.contractType === "proposal" ? "Compensation Schedule" : "Payment Schedule"}
+                        </span>
                         <p className="text-sm text-white mt-1">
-                          {paymentSchedule === "upfront" && "Pay Upfront - Full payment upon signing"}
-                          {paymentSchedule === "partial" && "Partial Payment - Deposit + balance later"}
-                          {paymentSchedule === "full" && "Pay in Full - Payment upon completion"}
-                          {paymentSchedule === "split" && "Split Payments - Multiple installments"}
-                          {paymentSchedule === "incremental" && "Incremental - Pay as you go"}
+                          {paymentSchedule === "upfront" && (data.contractType === "proposal" ? "Pay Upfront - Full compensation upon signing" : "Pay Upfront - Full payment upon signing")}
+                          {paymentSchedule === "partial" && (data.contractType === "proposal" ? "Partial Payment - Initial payment + balance later" : "Partial Payment - Deposit + balance later")}
+                          {paymentSchedule === "full" && (data.contractType === "proposal" ? "Pay in Full - Compensation upon completion" : "Pay in Full - Payment upon completion")}
+                          {paymentSchedule === "split" && (data.contractType === "proposal" ? "Split Payments - Multiple installments" : "Split Payments - Multiple installments")}
+                          {paymentSchedule === "incremental" && (data.contractType === "proposal" ? "Incremental - Pay as you go" : "Incremental - Pay as you go")}
                         </p>
                   </div>
                 )}
 
                     {paymentMethods.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-indigo-500/20">
-                        <span className="text-xs text-slate-400 uppercase tracking-wide mb-2 block">Payment Methods</span>
+                        <span className="text-xs text-slate-400 uppercase tracking-wide mb-2 block">
+                          {data.contractType === "proposal" ? "Payment Methods (How you'll pay)" : "Payment Methods"}
+                        </span>
                         <div className="flex flex-wrap gap-2">
                           {paymentMethods.map((method: string) => (
                             <span key={method} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">
@@ -7791,7 +8967,9 @@ function Step5Preview({
 
                     {data.paymentTerms && (
                       <div className="mt-3 pt-3 border-t border-indigo-500/20">
-                        <span className="text-xs text-slate-400 uppercase tracking-wide mb-2 block">Additional Terms</span>
+                        <span className="text-xs text-slate-400 uppercase tracking-wide mb-2 block">
+                          {data.contractType === "proposal" ? "Compensation Terms:" : "Additional Payment Terms:"}
+                        </span>
                         <p className="text-sm text-slate-300 whitespace-pre-wrap">{data.paymentTerms}</p>
                       </div>
                     )}
@@ -7799,7 +8977,11 @@ function Step5Preview({
                 </>
               ) : (
                 <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 text-center">
-                  <p className="text-slate-400 text-sm">No compensation specified for this contract</p>
+                  <p className="text-slate-400 text-sm">
+                    {data.contractType === "proposal" 
+                      ? "No compensation specified for this proposal"
+                      : "No compensation specified for this contract"}
+                  </p>
             </div>
           )}
             </CardContent>
