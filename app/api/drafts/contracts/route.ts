@@ -50,6 +50,24 @@ export async function POST(request: NextRequest) {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const isValidUUID = id && typeof id === 'string' && uuidRegex.test(id);
 
+    // Validate templateId - it must exist in contract_templates table
+    // If it's a default template (from default_contract_templates), set to null
+    let validTemplateId: string | undefined = undefined;
+    if (templateId && typeof templateId === 'string' && uuidRegex.test(templateId)) {
+      try {
+        const template = await db.templates.findById(templateId);
+        // Only use templateId if it exists in contract_templates and belongs to this contractor
+        if (template && template.contractorId === contractor.id) {
+          validTemplateId = templateId;
+        }
+        // If template doesn't exist or doesn't belong to contractor, templateId stays undefined
+        // This handles default templates which are in default_contract_templates, not contract_templates
+      } catch (error) {
+        // Template not found or error - set to undefined
+        console.log("Template ID not found in contract_templates, treating as default template:", templateId);
+      }
+    }
+
     // If id provided and valid UUID, update existing draft
     if (isValidUUID) {
       const draft = await db.contractDrafts.update(id, {
@@ -60,7 +78,7 @@ export async function POST(request: NextRequest) {
         depositAmount: depositAmount || 0,
         totalAmount: totalAmount || 0,
         clientId,
-        templateId,
+        templateId: validTemplateId,
         metadata: metadata || {},
       });
 
@@ -76,7 +94,7 @@ export async function POST(request: NextRequest) {
       contractorId: contractor.id,
       companyId: contractor.companyId,
       clientId,
-      templateId,
+      templateId: validTemplateId,
       title: title || "",
       content: content || "",
       fieldValues: fieldValues || {},

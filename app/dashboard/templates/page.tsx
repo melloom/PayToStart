@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus, FileText } from "lucide-react";
 import TemplatesListClient from "./templates-list-client";
-import DefaultTemplatesSection from "../../(dashboard)/templates/default-templates-section";
+import DefaultTemplatesSection from "./default-templates-section";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";

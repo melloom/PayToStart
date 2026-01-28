@@ -20,6 +20,7 @@ export default function ContractActions({
   hasContractorSignature,
   depositAmount,
   totalAmount,
+  contractFieldValues,
 }: {
   contractId: string;
   clientEmail: string;
@@ -29,6 +30,7 @@ export default function ContractActions({
   hasContractorSignature?: boolean;
   depositAmount?: number;
   totalAmount?: number;
+  contractFieldValues?: Record<string, any>;
 }) {
   const { toast } = useToast();
   const [isResending, setIsResending] = useState(false);
@@ -47,6 +49,10 @@ export default function ContractActions({
   const [isSigning, setIsSigning] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [customPaymentMethod, setCustomPaymentMethod] = useState<string>("");
+  // Get initial value from contract fieldValues, default to true for backwards compatibility
+  const [requiresSignature, setRequiresSignature] = useState<boolean>(
+    contractFieldValues?.requiresSignature !== false
+  );
   
   // Check if contract has payment amounts
   const hasPayment = (depositAmount && depositAmount > 0) || (totalAmount && totalAmount > 0);
@@ -135,6 +141,7 @@ export default function ContractActions({
           email: emailToSend.trim(),
           password: usePassword ? password : null,
           paymentMethod: hasPayment ? finalPaymentMethod : null,
+          requiresSignature: requiresSignature, // Add signature requirement toggle
         }),
       });
 
@@ -152,6 +159,7 @@ export default function ContractActions({
         setEmailToSend(clientEmail);
         setPaymentMethod("");
         setCustomPaymentMethod("");
+        setRequiresSignature(contractFieldValues?.requiresSignature !== false); // Reset to contract value
       } else {
         const error = await response.json();
         toast({
@@ -341,6 +349,22 @@ export default function ContractActions({
                 </p>
               </div>
             )}
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="requiresSignature"
+                checked={requiresSignature}
+                onCheckedChange={(checked) => setRequiresSignature(checked === true)}
+              />
+              <Label htmlFor="requiresSignature" className="cursor-pointer">
+                Require signature (client must draw a signature - mandatory)
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground pl-6">
+              {requiresSignature 
+                ? "Client must type their name AND draw a signature. Signature drawing is mandatory."
+                : "Client only needs to type their name to acknowledge the contract. No signature drawing required."}
+            </p>
 
             <div className="flex items-center space-x-2">
               <Checkbox

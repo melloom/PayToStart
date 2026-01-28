@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, Shield, Lock, CheckCircle2, DollarSign, CreditCard, Info, AlertCircle } from "lucide-react";
+import { Loader2, Shield, Lock, CheckCircle2, DollarSign, CreditCard, Info, AlertCircle, X } from "lucide-react";
 import { SignatureCanvas } from "@/components/signature/signature-canvas";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -79,6 +79,13 @@ export default function SignContractPage() {
   const [verifiedPassword, setVerifiedPassword] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState("");
   const [requiresPassword, setRequiresPassword] = useState(false);
+  const [showPaymentConfirmationDialog, setShowPaymentConfirmationDialog] = useState(false);
+  const [showPayInFullConfirmationDialog, setShowPayInFullConfirmationDialog] = useState(false);
+  const [pendingCheckoutUrl, setPendingCheckoutUrl] = useState<string | null>(null);
+  const [pendingPaymentAmount, setPendingPaymentAmount] = useState<number>(0);
+  const [pendingPaymentDueDate, setPendingPaymentDueDate] = useState<string | null>(null);
+  const [voidedContractPayments, setVoidedContractPayments] = useState<any[]>([]);
+  const [voidedPaymentsLoaded, setVoidedPaymentsLoaded] = useState(false);
   
   // Check for canceled parameter
   const canceled = searchParams.get("canceled");
@@ -287,6 +294,16 @@ export default function SignContractPage() {
     }
     if (!contract) return;
 
+    // Check if signature is required but not provided
+    if (requiresSignature && (!data.signatureDataUrl || data.signatureDataUrl.trim() === "")) {
+      toast({
+        title: "Signature Required",
+        description: "Please draw your signature. A signature is required for this contract.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSigning(true);
     try {
       // Get client IP and user agent
@@ -301,9 +318,19 @@ export default function SignContractPage() {
         agree: data.agree === true, // Must be exactly true
       };
       
-      // Only include signatureDataUrl if it's actually provided (not null/undefined/empty)
+      // Include signatureDataUrl if provided (or required)
       if (data.signatureDataUrl && data.signatureDataUrl.trim() !== "") {
         requestBody.signatureDataUrl = data.signatureDataUrl;
+      } else if (requiresSignature) {
+        // If signature is required but not provided, this should have been caught above
+        // But add it here as a safety check
+        toast({
+          title: "Signature Required",
+          description: "Please draw your signature before submitting.",
+          variant: "destructive",
+        });
+        setIsSigning(false);
+        return;
       }
       
       // Include password in body if contract requires it
@@ -321,25 +348,142 @@ export default function SignContractPage() {
         const result = await response.json();
         console.log("[SIGN] Signing successful, result:", result);
         
-        // If deposit is required, redirect to payment IMMEDIATELY
-        if (contract.depositAmount > 0) {
-          console.log("[SIGN] Deposit required, redirecting to payment. checkoutUrl:", result.checkoutUrl);
-          // Show toast but redirect immediately (don't wait)
+        // Check payment schedule to determine if immediate payment is required
+        const paymentSchedule = (contract.fieldValues as any)?.paymentSchedule;
+        const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+        const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+        const requiresImmediatePayment = contract.depositAmount > 0 || isPayUpfront;
+        
+        if (requiresImmediatePayment) {
+          // Deposit or upfront payment - show confirmation dialog for upfront, redirect immediately for deposit
+          console.log("[SIGN] Immediate payment required. checkoutUrl:", result.checkoutUrl);
+          
+          if (isPayUpfront) {
+            // Show confirmation dialog for "pay upfront" before redirecting
+            setPendingCheckoutUrl(result.checkoutUrl);
+            setPendingPaymentAmount(contract.totalAmount);
+            setShowPaymentConfirmationDialog(true);
+            toast({
+              title: "Contract signed successfully!",
+              description: "Please confirm payment to proceed.",
+              duration: 2000,
+            });
+          } else if (isIncremental && isIncrementalPaymentDueNow) {
+            // Incremental payment due now - redirect to payment immediately
+            toast({
+              title: "Contract signed successfully!",
+              description: `First payment is due. Redirecting to payment...`,
+              duration: 1000,
+            });
+            
+            if (result.checkoutUrl) {
+              // Redirect to Stripe Checkout immediately
+              window.location.href = result.checkoutUrl;
+            } else {
+              // Fallback to payment page immediately
+              window.location.href = `/pay/${params.token}`;
+            }
+          } else {
+            // Deposit payment - redirect immediately (no confirmation needed)
+            toast({
+              title: "Contract signed successfully!",
+              description: `Redirecting to payment page...`,
+              duration: 1000,
+            });
+            
+            if (result.checkoutUrl) {
+              // Redirect to Stripe Checkout immediately
+              window.location.href = result.checkoutUrl;
+            } else {
+              // Fallback to payment page immediately
+              window.location.href = `/pay/${params.token}`;
+            }
+          }
+        } else if (isPayInFull) {
+          // Pay in full - show confirmation dialog with payment terms
+          const paymentScheduleConfig = (contract.fieldValues as any)?.paymentScheduleConfig || {};
+          const balanceDueDate = paymentScheduleConfig?.balanceDueDate;
+          const customBalanceDueDate = paymentScheduleConfig?.customBalanceDueDate;
+          let dueDateText = "Upon completion";
+          
+          if (balanceDueDate) {
+            // Check if balanceDueDate is a date string (YYYY-MM-DD format) or a preset option
+            const isDateString = /^\d{4}-\d{2}-\d{2}$/.test(balanceDueDate);
+            
+            if (isDateString) {
+              // It's a custom date
+              try {
+                const customDate = new Date(balanceDueDate);
+                dueDateText = customDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+              } catch (e) {
+                dueDateText = "As specified in agreement";
+              }
+            } else if (balanceDueDate === "upon_completion") {
+              dueDateText = "Upon completion and acceptance";
+            } else if (balanceDueDate === "within_7_days_completion") {
+              dueDateText = "Within 7 days of completion";
+            } else if (balanceDueDate === "within_14_days_completion") {
+              dueDateText = "Within 14 days of completion";
+            } else if (balanceDueDate === "net_15") {
+              dueDateText = "Net 15 days after completion";
+            } else if (balanceDueDate === "net_30") {
+              dueDateText = "Net 30 days after completion";
+            } else if (balanceDueDate === "custom") {
+              // If it's set to "custom", check for customBalanceDueDate field
+              if (customBalanceDueDate) {
+                try {
+                  const customDate = new Date(customBalanceDueDate);
+                  dueDateText = customDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                } catch (e) {
+                  dueDateText = "As specified in agreement";
+                }
+              } else {
+                dueDateText = "As specified in agreement";
+              }
+            }
+          }
+          
+          setPendingPaymentAmount(contract.totalAmount);
+          setPendingPaymentDueDate(dueDateText);
+          setShowPayInFullConfirmationDialog(true);
+          
           toast({
             title: "Contract signed successfully!",
-            description: `Redirecting to payment page...`,
-            duration: 1000,
+            description: "Please review payment terms.",
+            duration: 2000,
           });
+        } else if (isIncremental && !isIncrementalPaymentDueNow) {
+          // Incremental payment with future first payment date - show confirmation dialog
+          const firstPaymentDate = paymentScheduleConfig?.firstPaymentDate;
+          const paymentAmount = paymentScheduleConfig?.paymentDates?.[0]?.amount || "0";
+          const paymentFrequency = paymentScheduleConfig?.paymentFrequency || "monthly";
           
-          if (result.checkoutUrl) {
-            // Redirect to Stripe Checkout immediately
-            window.location.href = result.checkoutUrl;
-          } else {
-            // Fallback to payment page immediately
-            window.location.href = `/pay/${params.token}`;
+          let dueDateText = "As specified";
+          if (firstPaymentDate) {
+            try {
+              const dueDate = new Date(firstPaymentDate);
+              dueDateText = dueDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            } catch (e) {
+              dueDateText = "As specified";
+            }
           }
+          
+          const frequencyText = paymentFrequency === "weekly" ? "week" 
+            : paymentFrequency === "biweekly" ? "2 weeks"
+            : paymentFrequency === "monthly" ? "month"
+            : "3 months";
+          
+          setPendingPaymentAmount(parseFloat(paymentAmount));
+          setPendingPaymentDueDate(`First payment: ${dueDateText}. Amount: $${parseFloat(paymentAmount).toFixed(2)} per ${frequencyText}`);
+          setShowPayInFullConfirmationDialog(true);
+          
+          toast({
+            title: "Contract signed successfully!",
+            description: "Please review payment schedule.",
+            duration: 2000,
+          });
         } else {
-          // No deposit, finalize in background and redirect immediately
+          // No payment required, finalize in background and redirect immediately
           toast({
             title: "Contract signed!",
             description: "Generating PDF...",
@@ -425,9 +569,100 @@ export default function SignContractPage() {
     );
   }
 
+  // Fetch payments for voided contract check
+  useEffect(() => {
+    if (contract?.status === "cancelled" && !voidedPaymentsLoaded && contract.id) {
+      fetch(`/api/contracts/${contract.id}/payments`)
+        .then(res => res.json())
+        .then(data => {
+          setVoidedContractPayments(data.payments || []);
+          setVoidedPaymentsLoaded(true);
+        })
+        .catch(() => {
+          setVoidedPaymentsLoaded(true);
+        });
+    }
+  }, [contract?.status, contract?.id, voidedPaymentsLoaded]);
+
+  // Check if contract is voided/cancelled
+  if (contract.status === "cancelled") {
+    const hasCompletedPayments = voidedContractPayments.some((p: any) => p.status === "completed");
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center px-4 py-12">
+        <Card className="w-full max-w-lg border-2 border-red-200 shadow-2xl bg-white">
+          <CardHeader className="text-center pb-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center shadow-lg">
+                <X className="h-10 w-10 text-white" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl font-bold text-slate-900 mb-2">
+              Contract Has Been Voided
+            </CardTitle>
+            <CardDescription className="text-slate-600 text-lg">
+              This contract is no longer active
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200 p-6 rounded-xl">
+              <div className="space-y-3">
+                <p className="text-slate-700 font-medium">
+                  This contract has been voided by the contractor and is no longer valid for signing.
+                </p>
+                {hasCompletedPayments && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mt-4">
+                    <p className="text-sm font-medium text-green-800 mb-1">
+                      <CheckCircle2 className="h-4 w-4 inline mr-2" />
+                      Payment Refunded
+                    </p>
+                    <p className="text-xs text-green-700">
+                      If you made any payments for this contract, they have been automatically refunded to your original payment method. 
+                      Please allow 5-10 business days for the refund to appear in your account.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl">
+              <p className="text-sm text-blue-900">
+                <strong className="font-semibold">What should you do?</strong>
+                <br />
+                If you have questions about this contract or need assistance, please contact the contractor directly.
+              </p>
+            </div>
+
+            {contractor && (
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
+                <p className="text-xs text-slate-600 mb-2">Contractor Information:</p>
+                <p className="text-sm font-medium text-slate-900">{contractor.name}</p>
+                {contractor.companyName && (
+                  <p className="text-xs text-slate-600">{contractor.companyName}</p>
+                )}
+                {contractor.email && (
+                  <p className="text-xs text-slate-600 mt-1">
+                    <a href={`mailto:${contractor.email}`} className="text-blue-600 hover:underline">
+                      {contractor.email}
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (contract.status === "signed" || contract.status === "paid" || contract.status === "completed") {
-    // If signed but has deposit, redirect to payment
-    if (contract.depositAmount > 0 && contract.status === "signed") {
+    // Check if immediate payment is required (deposit or upfront, but NOT pay in full)
+    const paymentSchedule = (contract.fieldValues as any)?.paymentSchedule;
+    const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+    const requiresImmediatePayment = contract.depositAmount > 0 || isPayUpfront;
+    
+    // If signed but immediate payment is required, redirect to payment
+    if (requiresImmediatePayment && contract.status === "signed") {
       return (
         <div className="min-h-screen flex items-center justify-center px-4">
           <Card className="w-full max-w-md">
@@ -470,6 +705,7 @@ export default function SignContractPage() {
   const compensationType = (contract as any)?.compensationType || (contract as any)?.fieldValues?.compensationType || "";
   const paymentSchedule = (contract as any)?.fieldValues?.paymentSchedule || "";
   const paymentScheduleConfig = (contract as any)?.fieldValues?.paymentScheduleConfig || {};
+  const requiresSignature = (contract as any)?.fieldValues?.requiresSignature !== false; // Default to true for backwards compatibility
   const hasDeposit = contract.depositAmount > 0;
   const paymentRequired = hasDeposit ? "on sign" : "after signing";
   
@@ -948,21 +1184,35 @@ export default function SignContractPage() {
                   )}
                 </div>
 
-                {/* Signature Canvas */}
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-gray-900 dark:text-gray-100 text-base font-semibold">
-                      Digital Signature (Optional)
-                    </Label>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Draw your signature using your mouse or touchscreen. If you prefer, you can skip this and just use your typed name.
+                {/* Signature Canvas - Show if signature is required, hide if not */}
+                {requiresSignature && (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label className="text-gray-900 dark:text-gray-100 text-base font-semibold">
+                        Digital Signature <span className="text-red-500">*</span> (Required)
+                      </Label>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Please draw your signature using your mouse or touchscreen. A signature is required to complete this contract.
+                      </p>
+                    </div>
+                    <SignatureCanvas
+                      onSignatureChange={handleSignatureChange}
+                      value={signatureDataUrl || undefined}
+                    />
+                    {!signatureDataUrl && (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        Please draw your signature above. It is required to complete this contract.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {!requiresSignature && (
+                  <div className="space-y-2 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <p className="text-sm text-blue-900 dark:text-blue-100">
+                      <strong>Note:</strong> This contract only requires you to type your name above. No signature drawing is needed.
                     </p>
                   </div>
-                  <SignatureCanvas
-                    onSignatureChange={handleSignatureChange}
-                    value={signatureDataUrl || undefined}
-                  />
-                </div>
+                )}
 
                 {/* Agreement Checkbox */}
                 <div className="flex items-start space-x-3">
@@ -1017,8 +1267,155 @@ export default function SignContractPage() {
               </div>
             </form>
           </CardContent>
-        </Card>
+          </Card>
+        </div>
       </div>
-    </div>
-  );
-}
+      
+      {/* Payment Confirmation Dialog for Pay Upfront */}
+      <Dialog open={showPaymentConfirmationDialog} onOpenChange={setShowPaymentConfirmationDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-indigo-600" />
+              Payment Required
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Your contract has been signed successfully! To complete the process, payment is required.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-lg p-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium text-gray-700">Payment Amount:</span>
+                <span className="text-2xl font-bold text-indigo-600">
+                  ${pendingPaymentAmount.toFixed(2)}
+                </span>
+              </div>
+              <p className="text-xs text-gray-600 mt-2">
+                You will be redirected to a secure payment page to complete your payment.
+              </p>
+            </div>
+            
+            <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-blue-900">
+                <p className="font-semibold mb-1">What happens next?</p>
+                <ul className="list-disc list-inside space-y-1 text-blue-800">
+                  <li>You'll be redirected to a secure Stripe checkout page</li>
+                  <li>Complete your payment using any major credit card</li>
+                  <li>You'll receive a receipt via email immediately</li>
+                  <li>Your contract will be finalized and emailed to you</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPaymentConfirmationDialog(false);
+                setPendingCheckoutUrl(null);
+                // Redirect to complete page - they can pay later
+                window.location.href = `/sign/${params.token}/complete`;
+              }}
+            >
+              Pay Later
+            </Button>
+            <Button
+              onClick={() => {
+                setShowPaymentConfirmationDialog(false);
+                if (pendingCheckoutUrl) {
+                  // Redirect to Stripe Checkout
+                  window.location.href = pendingCheckoutUrl;
+                } else {
+                  // Fallback to payment page
+                  window.location.href = `/pay/${params.token}`;
+                }
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700"
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Proceed to Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Payment Terms Confirmation Dialog for Pay in Full */}
+      <Dialog open={showPayInFullConfirmationDialog} onOpenChange={setShowPayInFullConfirmationDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              Contract Signed - Payment Terms
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Your contract has been signed successfully! Please review the payment terms below.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-lg p-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium text-gray-700">Full Payment Amount:</span>
+                <span className="text-2xl font-bold text-green-600">
+                  ${pendingPaymentAmount.toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-3 pt-3 border-t border-green-300">
+                <p className="text-sm font-semibold text-gray-700 mb-1">Payment Due:</p>
+                <p className="text-base text-gray-800 font-medium">
+                  {pendingPaymentDueDate || "Upon completion"}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-blue-900">
+                <p className="font-semibold mb-1">Payment Agreement:</p>
+                <p className="text-blue-800">
+                  By proceeding, you acknowledge that you agree to pay the full amount of <strong>${pendingPaymentAmount.toFixed(2)}</strong> according to the terms specified in the contract ({pendingPaymentDueDate || "upon completion"}).
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-amber-900">
+                <p className="font-semibold mb-1">What happens next?</p>
+                <ul className="list-disc list-inside space-y-1 text-amber-800">
+                  <li>You can pay when ready using the payment link</li>
+                  <li>A payment link will be available on the completion page</li>
+                  <li>You'll receive email reminders when payment is due</li>
+                  <li>Once paid, the contract will be finalized with receipt</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setShowPayInFullConfirmationDialog(false);
+                // Start finalization but don't wait for it
+                fetch(`/api/contracts/finalize/${params.token}`, {
+                  method: "POST",
+                }).catch((err) => {
+                  console.error("[SIGN] Finalize error (non-blocking):", err);
+                });
+                // Redirect to complete page - they can pay later
+                window.location.href = `/sign/${params.token}/complete`;
+              }}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              I Understand & Agree
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }

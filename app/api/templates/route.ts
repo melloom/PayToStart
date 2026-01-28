@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import type { ContractTemplate } from "@/lib/types";
 import { canPerformAction, incrementUsage } from "@/lib/subscriptions";
 import { templateSchema } from "@/lib/validations";
+import { createClient } from "@/lib/supabase-server";
 import {
   checkAPIRateLimit,
   sanitizeInput,
@@ -24,7 +25,41 @@ export async function GET(request: Request) {
     }
 
     const contractor = authResult.contractor;
-    const templates = await db.templates.findByContractorId(contractor.id);
+    
+    // Get contractType from query parameters
+    const url = new URL(request.url);
+    const contractType = url.searchParams.get("contractType") as "contract" | "proposal" | null;
+    
+    // Fetch templates with optional contract type filter
+    const supabase = await createClient();
+    let query = supabase
+      .from("contract_templates")
+      .select("*")
+      .eq("contractor_id", contractor.id);
+    
+    // Filter by contract type if specified
+    if (contractType) {
+      query = query.eq("contract_type", contractType);
+    }
+    
+    const { data, error } = await query.order("created_at", { ascending: false });
+    
+    if (error) {
+      console.error("Error fetching templates:", error);
+      return createSecureErrorResponse("Failed to fetch templates", 500, error);
+    }
+    
+    // Map database rows to ContractTemplate format
+    const templates = (data || []).map((row: any) => ({
+      id: row.id,
+      contractorId: row.contractor_id,
+      companyId: row.company_id,
+      name: row.name,
+      content: row.content,
+      fields: row.fields || [],
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    }));
     
     return createSecureResponse({ templates });
   } catch (error) {

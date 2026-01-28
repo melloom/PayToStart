@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
-import { Loader2, CreditCard, CheckCircle, Shield, Zap, Mail } from "lucide-react";
+import { Loader2, CreditCard, CheckCircle, Shield, Zap, Mail, X } from "lucide-react";
 import type { Contract, Client } from "@/lib/types";
 
 // Force dynamic rendering - prevent static generation
@@ -88,6 +88,13 @@ export default function PaymentPage() {
             console.error("Error fetching payments:", error);
           }
 
+          // Check if contract is voided/cancelled
+          if (data.contract.status === "cancelled") {
+            // Contract has been voided - don't redirect, just show the voided message
+            setIsLoading(false);
+            return;
+          }
+
           // Check if already paid
           if (data.contract.status === "completed") {
             setPaymentCompleted(true);
@@ -119,15 +126,89 @@ export default function PaymentPage() {
   const handlePayment = async () => {
     if (!contract) return;
     
-    // Calculate payment amount - use remaining balance if contract is already paid, otherwise use deposit
+    // Calculate payment amount based on payment schedule
+    const paymentSchedule = contract.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+    const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+    const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+    const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+    const isIncremental = paymentSchedule === "incremental";
+    const isSplit = paymentSchedule === "split";
+    
     const totalPaid = payments
       .filter((p: any) => p.status === "completed")
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
     const calculatedRemainingBalance = (contract.totalAmount || 0) - totalPaid;
     const isRemainingBalancePayment = contract.status === "paid" || totalPaid > 0;
-    const paymentAmount = isRemainingBalancePayment && calculatedRemainingBalance > 0.01
-      ? calculatedRemainingBalance
-      : contract.depositAmount;
+    
+    // Determine payment amount
+    let paymentAmount: number;
+    let paymentTypeForCheckout = paymentType;
+    let paymentNumber = 1;
+    let paymentIndex = 0;
+    
+    if (isSplit) {
+      // Split payment - find next due payment
+      const paymentDates = paymentScheduleConfig?.paymentDates || [];
+      const paidAmounts = payments
+        .filter((p: any) => p.status === "completed")
+        .map((p: any) => Number(p.amount));
+      
+      // Find first unpaid payment (by amount matching)
+      let foundPayment = null;
+      for (let i = 0; i < paymentDates.length; i++) {
+        const payment = paymentDates[i];
+        const paymentAmount = parseFloat(payment.amount || "0");
+        // Check if this payment amount hasn't been paid yet
+        if (!paidAmounts.some(paid => Math.abs(paid - paymentAmount) < 0.01)) {
+          foundPayment = { ...payment, index: i, number: i + 1 };
+          break;
+        }
+      }
+      
+      if (!foundPayment || !foundPayment.amount) {
+        toast({
+          title: "All Payments Complete",
+          description: "All scheduled payments have been completed for this contract.",
+          variant: "default",
+        });
+        return;
+      }
+      
+      paymentAmount = parseFloat(foundPayment.amount);
+      paymentNumber = foundPayment.number;
+      paymentIndex = foundPayment.index;
+      paymentTypeForCheckout = "split_payment";
+    } else if (isIncremental) {
+      // Incremental payment - use amount per period
+      const incrementalAmount = paymentScheduleConfig?.paymentDates?.[0]?.amount 
+        ? parseFloat(paymentScheduleConfig.paymentDates[0].amount) 
+        : 0;
+      
+      if (incrementalAmount <= 0) {
+        toast({
+          title: "Payment Configuration Error",
+          description: "Incremental payment amount not configured. Please contact the contractor.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Calculate which payment number this is based on total paid
+      paymentNumber = Math.floor(totalPaid / incrementalAmount) + 1;
+      paymentAmount = incrementalAmount;
+      paymentTypeForCheckout = "incremental_payment";
+    } else if (isPayInFull || isPayUpfront) {
+      // For "pay in full" or "pay upfront", use total amount (or remaining balance if already paid)
+      paymentAmount = isRemainingBalancePayment && calculatedRemainingBalance > 0.01
+        ? calculatedRemainingBalance
+        : contract.totalAmount;
+    } else if (isRemainingBalancePayment && calculatedRemainingBalance > 0.01) {
+      // Remaining balance payment
+      paymentAmount = calculatedRemainingBalance;
+    } else {
+      // Deposit payment
+      paymentAmount = contract.depositAmount;
+    }
     
     if (paymentAmount <= 0) {
       toast({
@@ -181,7 +262,9 @@ export default function PaymentPage() {
         contractId: contract.id,
         hasClient: !!client,
         clientEmail: emailToUse,
-        depositAmount: contract.depositAmount,
+        paymentAmount: paymentAmount,
+        paymentSchedule: paymentSchedule,
+        isPayInFull: isPayInFull,
       });
       
       const response = await fetch(apiUrl, {
@@ -190,10 +273,13 @@ export default function PaymentPage() {
         body: JSON.stringify({
           contractId: contract.id,
           signingToken: token,
-          amount: contract.depositAmount,
+          amount: paymentAmount,
           currency: "usd",
           // Pass client email from input field
           clientEmail: emailToUse,
+          paymentType: paymentTypeForCheckout,
+          paymentNumber: (isIncremental || isSplit) ? paymentNumber : undefined,
+          paymentIndex: isSplit ? paymentIndex : undefined,
         }),
       });
 
@@ -262,14 +348,77 @@ export default function PaymentPage() {
     );
   }
 
-  if (!contract || contract.depositAmount <= 0) {
+  // Check if payment is required (deposit, upfront, pay in full, incremental, or split)
+  const paymentSchedule = contract?.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+  const paymentScheduleConfig = contract?.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+  const isPayUpfront = paymentSchedule === "upfront" && contract?.depositAmount === 0 && contract?.totalAmount > 0;
+  const isPayInFull = paymentSchedule === "full" && contract?.depositAmount === 0 && contract?.totalAmount > 0;
+  const isIncremental = paymentSchedule === "incremental";
+  const isSplit = paymentSchedule === "split";
+  const hasIncrementalPayment = isIncremental && paymentScheduleConfig?.paymentDates?.[0]?.amount && parseFloat(paymentScheduleConfig.paymentDates[0].amount) > 0;
+  const hasSplitPayment = isSplit && paymentScheduleConfig?.paymentDates && paymentScheduleConfig.paymentDates.length > 0;
+  const hasPaymentRequired = contract && (contract.depositAmount > 0 || isPayUpfront || isPayInFull || hasIncrementalPayment || hasSplitPayment);
+  
+  // Show voided contract message
+  if (contract?.status === "cancelled") {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center px-4 py-12">
+        <Card className="w-full max-w-lg border-2 border-red-200 shadow-2xl bg-white">
+          <CardHeader className="text-center pb-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center shadow-lg">
+                <X className="h-10 w-10 text-white" />
+              </div>
+            </div>
+            <CardTitle className="text-3xl font-bold text-slate-900 mb-2">
+              Contract Has Been Voided
+            </CardTitle>
+            <CardDescription className="text-slate-600 text-lg">
+              This contract is no longer active
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200 p-6 rounded-xl">
+              <div className="space-y-3">
+                <p className="text-slate-700 font-medium">
+                  This contract has been voided by the contractor and is no longer valid.
+                </p>
+                {payments && payments.some((p: any) => p.status === "completed") && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mt-4">
+                    <p className="text-sm font-medium text-green-800 mb-1">
+                      <CheckCircle className="h-4 w-4 inline mr-2" />
+                      Payment Refunded
+                    </p>
+                    <p className="text-xs text-green-700">
+                      If you made any payments for this contract, they have been automatically refunded to your original payment method. 
+                      Please allow 5-10 business days for the refund to appear in your account.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 p-5 rounded-xl">
+              <p className="text-sm text-blue-900">
+                <strong className="font-semibold">What should you do?</strong>
+                <br />
+                If you have questions about this contract or need assistance, please contact the contractor directly.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!contract || !hasPaymentRequired) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>No Payment Required</CardTitle>
             <CardDescription>
-              This contract does not require a deposit payment.
+              This contract does not require a payment.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -368,13 +517,155 @@ export default function PaymentPage() {
               <div className="border-t border-purple-300 pt-4 mt-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <p className="text-sm text-slate-600 mb-1">Deposit Required</p>
-                    <p className="text-xs text-slate-500">Pay now to secure your contract</p>
+                    {(() => {
+                      const paymentSchedule = contract.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+                      const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+                      const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                      const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                      const isIncremental = paymentSchedule === "incremental";
+                      const isSplit = paymentSchedule === "split";
+                      const totalPaid = payments
+                        .filter((p: any) => p.status === "completed")
+                        .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+                      const remainingBalance = (contract.totalAmount || 0) - totalPaid;
+                      const isRemainingBalance = contract.status === "paid" || totalPaid > 0;
+                      
+                      if (isSplit) {
+                        // Find next due payment
+                        const paymentDates = paymentScheduleConfig?.paymentDates || [];
+                        const paidAmounts = payments
+                          .filter((p: any) => p.status === "completed")
+                          .map((p: any) => Number(p.amount));
+                        
+                        let nextPayment = null;
+                        for (let i = 0; i < paymentDates.length; i++) {
+                          const payment = paymentDates[i];
+                          const paymentAmount = parseFloat(payment.amount || "0");
+                          if (!paidAmounts.some(paid => Math.abs(paid - paymentAmount) < 0.01)) {
+                            nextPayment = { ...payment, number: i + 1, total: paymentDates.length };
+                            break;
+                          }
+                        }
+                        
+                        if (nextPayment) {
+                          let dueDateText = "";
+                          if (nextPayment.date) {
+                            try {
+                              const dueDate = new Date(nextPayment.date);
+                              dueDateText = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                            } catch (e) {
+                              dueDateText = "";
+                            }
+                          }
+                          return (
+                            <>
+                              <p className="text-sm text-slate-600 mb-1">Payment {nextPayment.number} of {nextPayment.total}</p>
+                              <p className="text-xs text-slate-500">
+                                {dueDateText ? `Due: ${dueDateText}` : "Split payment installment"}
+                              </p>
+                            </>
+                          );
+                        } else {
+                          return (
+                            <>
+                              <p className="text-sm text-slate-600 mb-1">All Payments Complete</p>
+                              <p className="text-xs text-slate-500">No remaining payments</p>
+                            </>
+                          );
+                        }
+                      } else if (isIncremental) {
+                        const paymentNumber = Math.floor(totalPaid / (parseFloat(paymentScheduleConfig?.paymentDates?.[0]?.amount || "1") || 1)) + 1;
+                        const firstPaymentDate = paymentScheduleConfig?.firstPaymentDate;
+                        let dueDateText = "";
+                        if (firstPaymentDate) {
+                          try {
+                            const dueDate = new Date(firstPaymentDate);
+                            dueDateText = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                          } catch (e) {
+                            dueDateText = "";
+                          }
+                        }
+                        return (
+                          <>
+                            <p className="text-sm text-slate-600 mb-1">Payment {paymentNumber} - Incremental</p>
+                            <p className="text-xs text-slate-500">
+                              {dueDateText ? `Due: ${dueDateText}` : "Pay as you go"}
+                            </p>
+                          </>
+                        );
+                      } else if (isRemainingBalance && remainingBalance > 0.01) {
+                        return (
+                          <>
+                            <p className="text-sm text-slate-600 mb-1">Remaining Balance</p>
+                            <p className="text-xs text-slate-500">Complete your payment</p>
+                          </>
+                        );
+                      } else if (isPayInFull || isPayUpfront) {
+                        return (
+                          <>
+                            <p className="text-sm text-slate-600 mb-1">{isPayUpfront ? "Full Payment Required" : "Full Payment"}</p>
+                            <p className="text-xs text-slate-500">{isPayUpfront ? "Due upon signing" : "Pay when ready"}</p>
+                          </>
+                        );
+                      } else {
+                        return (
+                          <>
+                            <p className="text-sm text-slate-600 mb-1">Deposit Required</p>
+                            <p className="text-xs text-slate-500">Pay now to secure your contract</p>
+                          </>
+                        );
+                      }
+                    })()}
                   </div>
                   <div className="text-right">
-                    <p className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
-                      ${contract.depositAmount.toFixed(2)}
-                    </p>
+                    {(() => {
+                      const paymentSchedule = contract.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+                      const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+                      const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                      const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                      const isIncremental = paymentSchedule === "incremental";
+                      const totalPaid = payments
+                        .filter((p: any) => p.status === "completed")
+                        .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+                      const remainingBalance = (contract.totalAmount || 0) - totalPaid;
+                      const isRemainingBalance = contract.status === "paid" || totalPaid > 0;
+                      
+                      let displayAmount: number;
+                      if (isSplit) {
+                        // Find next due payment amount
+                        const paymentDates = paymentScheduleConfig?.paymentDates || [];
+                        const paidAmounts = payments
+                          .filter((p: any) => p.status === "completed")
+                          .map((p: any) => Number(p.amount));
+                        
+                        let nextPaymentAmount = 0;
+                        for (let i = 0; i < paymentDates.length; i++) {
+                          const payment = paymentDates[i];
+                          const paymentAmount = parseFloat(payment.amount || "0");
+                          if (!paidAmounts.some(paid => Math.abs(paid - paymentAmount) < 0.01)) {
+                            nextPaymentAmount = paymentAmount;
+                            break;
+                          }
+                        }
+                        displayAmount = nextPaymentAmount;
+                      } else if (isIncremental) {
+                        displayAmount = paymentScheduleConfig?.paymentDates?.[0]?.amount 
+                          ? parseFloat(paymentScheduleConfig.paymentDates[0].amount) 
+                          : 0;
+                      } else if (isRemainingBalance && remainingBalance > 0.01) {
+                        displayAmount = remainingBalance;
+                      } else if (isPayInFull || isPayUpfront) {
+                        displayAmount = contract.totalAmount;
+                      } else {
+                        displayAmount = contract.depositAmount;
+                      }
+                      
+                      return (
+                        <p className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">
+                          ${displayAmount.toFixed(2)}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -460,7 +751,33 @@ export default function PaymentPage() {
               ) : (
                 <>
                   <CreditCard className="h-5 w-5 mr-2" />
-                  Pay ${contract.depositAmount.toFixed(2)} Now
+                  {(() => {
+                    const paymentSchedule = contract.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+                    const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+                    const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                    const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+                    const isIncremental = paymentSchedule === "incremental";
+                    const totalPaid = payments
+                      .filter((p: any) => p.status === "completed")
+                      .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+                    const remainingBalance = (contract.totalAmount || 0) - totalPaid;
+                    const isRemainingBalance = contract.status === "paid" || totalPaid > 0;
+                    
+                    let displayAmount: number;
+                    if (isIncremental) {
+                      displayAmount = paymentScheduleConfig?.paymentDates?.[0]?.amount 
+                        ? parseFloat(paymentScheduleConfig.paymentDates[0].amount) 
+                        : 0;
+                    } else if (isRemainingBalance && remainingBalance > 0.01) {
+                      displayAmount = remainingBalance;
+                    } else if (isPayInFull || isPayUpfront) {
+                      displayAmount = contract.totalAmount;
+                    } else {
+                      displayAmount = contract.depositAmount;
+                    }
+                    
+                    return `Pay $${displayAmount.toFixed(2)} Now`;
+                  })()}
                 </>
               )}
             </Button>

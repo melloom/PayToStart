@@ -123,6 +123,360 @@ export async function createDepositCheckoutSession(
 }
 
 /**
+ * Create a Stripe Checkout Session for full payment (pay in full contracts)
+ * Used when depositAmount is 0 but totalAmount > 0 (paymentSchedule === "full")
+ */
+export async function createFullPaymentCheckoutSession(
+  contract: Contract,
+  clientEmail: string,
+  signingToken: string
+) {
+  if (contract.totalAmount <= 0) {
+    throw new Error("Total amount must be greater than zero");
+  }
+
+  if (contract.depositAmount > 0) {
+    throw new Error("This function is for pay in full contracts (depositAmount must be 0)");
+  }
+
+  if (contract.status !== "signed") {
+    throw new Error("Contract must be signed before payment");
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Get or create Stripe customer for saving payment methods
+  let customerId: string | null = null;
+  try {
+    // Try to find existing customer by email
+    const existingCustomers = await stripe.customers.list({
+      email: clientEmail,
+      limit: 1,
+    });
+    
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
+    } else {
+      // Create new customer
+      const customer = await stripe.customers.create({
+        email: clientEmail,
+        metadata: {
+          contractId: contract.id,
+          companyId: contract.companyId,
+        },
+      });
+      customerId = customer.id;
+    }
+  } catch (error) {
+    console.error("Error creating/finding customer:", error);
+    // Continue without customer - payment method won't be saved
+  }
+
+  // Create Stripe Checkout Session for full payment
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `Full Payment for ${contract.title}`,
+            description: `Full contract payment - Contract #${contract.id.slice(0, 8)}`,
+          },
+          unit_amount: Math.round(contract.totalAmount * 100), // Convert to cents
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: `${baseUrl}/sign/${signingToken}/complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/sign/${signingToken}?canceled=1`,
+    customer: customerId || undefined, // Use customer if available, otherwise use email
+    customer_email: customerId ? undefined : clientEmail, // Only set email if no customer
+    metadata: {
+      contractId: contract.id,
+      contract_id: contract.id, // Support both formats for backward compatibility
+      signingToken: signingToken,
+      companyId: contract.companyId,
+      company_id: contract.companyId, // Support both formats
+      type: "full_payment",
+      customerId: customerId || "", // Store customer ID for later use
+    },
+    payment_intent_data: {
+      setup_future_usage: "off_session", // Allow saving payment method for future use
+      metadata: {
+        contractId: contract.id,
+        contract_id: contract.id,
+        signingToken: signingToken,
+        companyId: contract.companyId,
+        company_id: contract.companyId,
+        type: "full_payment",
+        customerId: customerId || "",
+      },
+    },
+    // Allow promotion codes
+    allow_promotion_codes: true,
+    // Collect billing address
+    billing_address_collection: "auto",
+  });
+
+  // Create payment record in database
+  try {
+    await db.payments.create({
+      contractId: contract.id,
+      companyId: contract.companyId,
+      amount: contract.totalAmount,
+      status: "pending",
+      paymentIntentId: session.id, // Store session ID
+    });
+  } catch (paymentError: any) {
+    // Log error but don't fail checkout session creation
+    // Payment record can be created later via webhook
+    console.error("Failed to create payment record:", {
+      error: paymentError.message,
+      stack: paymentError.stack,
+      contractId: contract.id,
+    });
+    // Continue - the webhook will create the payment record when payment completes
+  }
+
+  return session;
+}
+
+/**
+ * Create a Stripe Checkout Session for incremental payment (first payment in pay-as-you-go)
+ * Used when paymentSchedule === "incremental"
+ */
+export async function createIncrementalPaymentCheckoutSession(
+  contract: Contract,
+  clientEmail: string,
+  signingToken: string,
+  paymentAmount: number,
+  paymentNumber: number = 1
+) {
+  if (paymentAmount <= 0) {
+    throw new Error("Payment amount must be greater than zero");
+  }
+
+  if (contract.status !== "signed" && contract.status !== "paid") {
+    throw new Error("Contract must be signed before payment");
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Get or create Stripe customer for saving payment methods
+  let customerId: string | null = null;
+  try {
+    // Try to find existing customer by email
+    const existingCustomers = await stripe.customers.list({
+      email: clientEmail,
+      limit: 1,
+    });
+    
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
+    } else {
+      // Create new customer
+      const customer = await stripe.customers.create({
+        email: clientEmail,
+        metadata: {
+          contractId: contract.id,
+          companyId: contract.companyId,
+        },
+      });
+      customerId = customer.id;
+    }
+  } catch (error) {
+    console.error("Error creating/finding customer:", error);
+    // Continue without customer - payment method won't be saved
+  }
+
+  // Create Stripe Checkout Session for incremental payment
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `Payment ${paymentNumber} for ${contract.title}`,
+            description: `Incremental payment ${paymentNumber} - Contract #${contract.id.slice(0, 8)}`,
+          },
+          unit_amount: Math.round(paymentAmount * 100), // Convert to cents
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: `${baseUrl}/sign/${signingToken}/complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/pay/${signingToken}?canceled=1`,
+    customer: customerId || undefined,
+    customer_email: customerId ? undefined : clientEmail,
+    metadata: {
+      contractId: contract.id,
+      contract_id: contract.id,
+      signingToken: signingToken,
+      companyId: contract.companyId,
+      company_id: contract.companyId,
+      type: "incremental_payment",
+      paymentNumber: paymentNumber.toString(),
+      customerId: customerId || "",
+    },
+    payment_intent_data: {
+      setup_future_usage: "off_session", // Allow saving payment method for future incremental payments
+      metadata: {
+        contractId: contract.id,
+        contract_id: contract.id,
+        signingToken: signingToken,
+        companyId: contract.companyId,
+        company_id: contract.companyId,
+        type: "incremental_payment",
+        paymentNumber: paymentNumber.toString(),
+        customerId: customerId || "",
+      },
+    },
+    allow_promotion_codes: true,
+    billing_address_collection: "auto",
+  });
+
+  // Create payment record in database
+  try {
+    await db.payments.create({
+      contractId: contract.id,
+      companyId: contract.companyId,
+      amount: paymentAmount,
+      status: "pending",
+      paymentIntentId: session.id,
+    });
+  } catch (paymentError: any) {
+    console.error("Failed to create payment record:", {
+      error: paymentError.message,
+      stack: paymentError.stack,
+      contractId: contract.id,
+    });
+    // Continue - the webhook will create the payment record when payment completes
+  }
+
+  return session;
+}
+
+/**
+ * Create a Stripe Checkout Session for split payment (one payment in a split schedule)
+ * Used when paymentSchedule === "split"
+ */
+export async function createSplitPaymentCheckoutSession(
+  contract: Contract,
+  clientEmail: string,
+  signingToken: string,
+  paymentAmount: number,
+  paymentNumber: number,
+  paymentIndex: number
+) {
+  if (paymentAmount <= 0) {
+    throw new Error("Payment amount must be greater than zero");
+  }
+
+  if (contract.status !== "signed" && contract.status !== "paid") {
+    throw new Error("Contract must be signed before payment");
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Get or create Stripe customer for saving payment methods
+  let customerId: string | null = null;
+  try {
+    const existingCustomers = await stripe.customers.list({
+      email: clientEmail,
+      limit: 1,
+    });
+    
+    if (existingCustomers.data.length > 0) {
+      customerId = existingCustomers.data[0].id;
+    } else {
+      const customer = await stripe.customers.create({
+        email: clientEmail,
+        metadata: {
+          contractId: contract.id,
+          companyId: contract.companyId,
+        },
+      });
+      customerId = customer.id;
+    }
+  } catch (error) {
+    console.error("Error creating/finding customer:", error);
+  }
+
+  // Create Stripe Checkout Session for split payment
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: `Payment ${paymentNumber} for ${contract.title}`,
+            description: `Split payment ${paymentNumber} - Contract #${contract.id.slice(0, 8)}`,
+          },
+          unit_amount: Math.round(paymentAmount * 100),
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: `${baseUrl}/sign/${signingToken}/complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${baseUrl}/pay/${signingToken}?canceled=1`,
+    customer: customerId || undefined,
+    customer_email: customerId ? undefined : clientEmail,
+    metadata: {
+      contractId: contract.id,
+      contract_id: contract.id,
+      signingToken: signingToken,
+      companyId: contract.companyId,
+      company_id: contract.companyId,
+      type: "split_payment",
+      paymentNumber: paymentNumber.toString(),
+      paymentIndex: paymentIndex.toString(),
+      customerId: customerId || "",
+    },
+    payment_intent_data: {
+      setup_future_usage: "off_session",
+      metadata: {
+        contractId: contract.id,
+        contract_id: contract.id,
+        signingToken: signingToken,
+        companyId: contract.companyId,
+        company_id: contract.companyId,
+        type: "split_payment",
+        paymentNumber: paymentNumber.toString(),
+        paymentIndex: paymentIndex.toString(),
+        customerId: customerId || "",
+      },
+    },
+    allow_promotion_codes: true,
+    billing_address_collection: "auto",
+  });
+
+  // Create payment record in database
+  try {
+    await db.payments.create({
+      contractId: contract.id,
+      companyId: contract.companyId,
+      amount: paymentAmount,
+      status: "pending",
+      paymentIntentId: session.id,
+    });
+  } catch (paymentError: any) {
+    console.error("Failed to create payment record:", {
+      error: paymentError.message,
+      stack: paymentError.stack,
+      contractId: contract.id,
+    });
+  }
+
+  return session;
+}
+
+/**
  * Create a Stripe Checkout Session for remaining balance payment
  */
 export async function createRemainingBalanceCheckoutSession(
@@ -275,7 +629,33 @@ export async function processCompletedCheckoutSession(
   const paymentAmount = (session.amount_total || 0) / 100;
 
   // Verify payment amount based on type
-  if (paymentType === "remaining_balance") {
+  if (paymentType === "split_payment") {
+    // For split payments, verify against the expected amount for this payment number
+    const paymentNumber = parseInt(session.metadata?.paymentNumber || "1");
+    const paymentIndex = parseInt(session.metadata?.paymentIndex || "0");
+    const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+    const expectedPayment = paymentScheduleConfig?.paymentDates?.[paymentIndex];
+    const expectedAmount = expectedPayment?.amount ? parseFloat(expectedPayment.amount) : 0;
+    
+    if (Math.abs(paymentAmount - expectedAmount) > 0.01) {
+      throw new Error(
+        `Payment amount mismatch. Expected split payment ${paymentNumber}: $${expectedAmount.toFixed(2)}, Received: $${paymentAmount}`
+      );
+    }
+  } else if (paymentType === "incremental_payment") {
+    // For incremental payments, verify against the expected amount for this payment number
+    const paymentNumber = parseInt(session.metadata?.paymentNumber || "1");
+    const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+    const expectedAmount = paymentScheduleConfig?.paymentDates?.[0]?.amount 
+      ? parseFloat(paymentScheduleConfig.paymentDates[0].amount)
+      : 0;
+    
+    if (Math.abs(paymentAmount - expectedAmount) > 0.01) {
+      throw new Error(
+        `Payment amount mismatch. Expected incremental payment: $${expectedAmount.toFixed(2)}, Received: $${paymentAmount}`
+      );
+    }
+  } else if (paymentType === "remaining_balance") {
     // For remaining balance, calculate actual remaining balance
     const payments = await db.payments.findByContractId(contractId);
     const totalPaid = payments
@@ -286,6 +666,13 @@ export async function processCompletedCheckoutSession(
     if (Math.abs(paymentAmount - remainingBalance) > 0.01) {
       throw new Error(
         `Payment amount mismatch. Expected remaining balance: $${remainingBalance.toFixed(2)}, Received: $${paymentAmount}`
+      );
+    }
+  } else if (paymentType === "full_payment") {
+    // For full payment, verify against total amount
+    if (Math.abs(paymentAmount - contract.totalAmount) > 0.01) {
+      throw new Error(
+        `Payment amount mismatch. Expected full payment: $${contract.totalAmount}, Received: $${paymentAmount}`
       );
     }
   } else {

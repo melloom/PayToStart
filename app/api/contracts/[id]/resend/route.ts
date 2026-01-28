@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { getContractLinkEmail } from "@/lib/email/templates";
 import { hashPassword, generateToken, hashToken, getTokenExpiry } from "@/lib/security/tokens";
+import { checkFeatureAccess } from "@/lib/subscriptions";
 import { log } from "@/lib/logger";
 
 export async function POST(
@@ -21,6 +22,18 @@ export async function POST(
       return NextResponse.json({ message: "Contract not found" }, { status: 404 });
     }
 
+    // Check if user has email delivery feature access
+    const emailAccess = await checkFeatureAccess(contractor.companyId, "emailDelivery");
+    if (!emailAccess.hasAccess) {
+      return NextResponse.json(
+        { 
+          error: "Feature not available",
+          message: emailAccess.reason || "Email delivery is only available for paid subscribers. Please upgrade your plan to use this feature.",
+        },
+        { status: 403 }
+      );
+    }
+
     if (contract.status === "cancelled" || contract.status === "completed") {
       return NextResponse.json(
         { message: "Cannot resend a cancelled or completed contract" },
@@ -28,7 +41,7 @@ export async function POST(
       );
     }
 
-    const { email, password, paymentMethod } = await request.json();
+    const { email, password, paymentMethod, requiresSignature } = await request.json();
     
     // Get client to get email if not provided
     let clientEmailToUse = email;
@@ -86,6 +99,12 @@ export async function POST(
 
     const signingUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/sign/${signingToken}`;
 
+    // Get upfront offer amount from payment schedule config (for proposals)
+    const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+    const upfrontOfferAmount = paymentScheduleConfig?.includeUpfrontOffer && paymentScheduleConfig?.upfrontOfferAmount
+      ? parseFloat(paymentScheduleConfig.upfrontOfferAmount)
+      : undefined;
+
     // Generate email using template
     const { subject, html } = getContractLinkEmail({
       contractTitle: contract.title,
@@ -97,6 +116,8 @@ export async function POST(
       signingUrl,
       depositAmount: contract.depositAmount,
       totalAmount: contract.totalAmount,
+      isProposal: contract.contractType === "proposal",
+      upfrontOfferAmount,
     });
 
     // Send email
@@ -116,7 +137,7 @@ export async function POST(
         updateData.passwordHash = passwordHash;
       }
       
-      // Save payment method and recipient email to fieldValues if provided
+      // Save payment method, recipient email, and signature requirement to fieldValues if provided
       const currentFieldValues = contract.fieldValues || {};
       updateData.fieldValues = {
         ...currentFieldValues,
@@ -127,6 +148,14 @@ export async function POST(
       if (paymentMethod && typeof paymentMethod === "string" && paymentMethod.trim()) {
         updateData.fieldValues.paymentMethod = paymentMethod.trim();
         updateData.fieldValues.paymentMethodSetAt = new Date().toISOString();
+      }
+
+      // Store signature requirement (default to true if not specified for backwards compatibility)
+      if (requiresSignature !== undefined) {
+        updateData.fieldValues.requiresSignature = requiresSignature === true;
+      } else {
+        // Default to true if not specified (backwards compatibility)
+        updateData.fieldValues.requiresSignature = currentFieldValues.requiresSignature !== false;
       }
       
       if (contract.status === "draft" || contract.status === "ready") {
@@ -141,15 +170,17 @@ export async function POST(
             clientEmail: clientEmailToUse,
             paymentMethod: paymentMethod.trim(),
             paymentMethodSetAt: new Date().toISOString(),
+            requiresSignature: requiresSignature !== undefined ? requiresSignature === true : (currentFieldValues.requiresSignature !== false),
           },
         });
       } else {
-        // Even if no payment method, update the email to the most recent recipient
+        // Even if no payment method, update the email and signature requirement
         const currentFieldValues = contract.fieldValues || {};
         await db.contracts.update(contract.id, {
           fieldValues: {
             ...currentFieldValues,
             clientEmail: clientEmailToUse,
+            requiresSignature: requiresSignature !== undefined ? requiresSignature === true : (currentFieldValues.requiresSignature !== false),
           },
         });
       }

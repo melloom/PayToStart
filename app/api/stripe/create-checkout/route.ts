@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { createDepositCheckoutSession, createRemainingBalanceCheckoutSession } from "@/lib/payments";
+import { createDepositCheckoutSession, createRemainingBalanceCheckoutSession, createFullPaymentCheckoutSession, createIncrementalPaymentCheckoutSession, createSplitPaymentCheckoutSession } from "@/lib/payments";
 import { hashToken, verifyToken, isTokenExpired } from "@/lib/security/tokens";
 import { log } from "@/lib/logger";
 
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   try {
     // Parse body once and reuse
     const body = await request.json();
-    const { contractId, signingToken, amount, currency, clientEmail: requestClientEmail } = body;
+    const { contractId, signingToken, amount, currency, clientEmail: requestClientEmail, paymentType, paymentNumber, paymentIndex } = body;
 
     console.log("[CREATE-CHECKOUT] Request body:", {
       hasContractId: !!contractId,
@@ -320,17 +320,155 @@ export async function POST(request: Request) {
       depositAmount: contract.depositAmount,
     }, "Contract details before checkout creation");
 
-    // Create checkout session using payment utility
+    // Create checkout session using appropriate payment utility based on payment type
     try {
-      const session = await createDepositCheckoutSession(
-        contract,
-        clientEmail!,
-        signingToken
-      );
+      const paymentSchedule = contract.fieldValues ? (contract.fieldValues as any)?.paymentSchedule : null;
+      const isPayInFull = paymentSchedule === "full" && contract.depositAmount === 0 && contract.totalAmount > 0;
+      const isPayUpfront = paymentSchedule === "upfront" && contract.depositAmount === 0 && contract.totalAmount > 0;
+      
+      // Determine which checkout session to create
+      let session;
+      const isIncremental = paymentSchedule === "incremental";
+      const isSplit = paymentSchedule === "split";
+      
+      if (paymentType === "split_payment" || isSplit) {
+        // Split payment (multiple installments)
+        const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+        const paymentDates = paymentScheduleConfig?.paymentDates || [];
+        
+        // Determine which payment to process
+        let targetPaymentIndex = 0;
+        let targetPaymentNumber = 1;
+        let splitAmount = 0;
+        
+        if (paymentIndex !== undefined && paymentIndex !== null) {
+          // Use provided payment index
+          targetPaymentIndex = parseInt(paymentIndex);
+          targetPaymentNumber = targetPaymentIndex + 1;
+          const targetPayment = paymentDates[targetPaymentIndex];
+          splitAmount = targetPayment?.amount ? parseFloat(targetPayment.amount) : (amount ? parseFloat(amount) : 0);
+        } else if (amount) {
+          // Find payment by amount
+          splitAmount = parseFloat(amount);
+          const foundIndex = paymentDates.findIndex((p: any) => Math.abs(parseFloat(p.amount || "0") - splitAmount) < 0.01);
+          if (foundIndex >= 0) {
+            targetPaymentIndex = foundIndex;
+            targetPaymentNumber = foundIndex + 1;
+          }
+        } else {
+          // Use first unpaid payment
+          const payments = await db.payments.findByContractId(contract.id);
+          const paidAmounts = payments
+            .filter((p) => p.status === "completed")
+            .map((p) => Number(p.amount));
+          
+          // Find first payment that hasn't been fully paid
+          for (let i = 0; i < paymentDates.length; i++) {
+            const payment = paymentDates[i];
+            const paymentAmount = parseFloat(payment.amount || "0");
+            if (!paidAmounts.some(paid => Math.abs(paid - paymentAmount) < 0.01)) {
+              targetPaymentIndex = i;
+              targetPaymentNumber = i + 1;
+              splitAmount = paymentAmount;
+              break;
+            }
+          }
+        }
+        
+        if (splitAmount <= 0) {
+          return NextResponse.json(
+            { message: "Invalid split payment amount or no payment found" },
+            { status: 400 }
+          );
+        }
+        
+        log.info({
+          contractId: contract.id,
+          paymentType: "split_payment",
+          paymentSchedule,
+          paymentNumber: targetPaymentNumber,
+          paymentIndex: targetPaymentIndex,
+          amount: splitAmount,
+        }, "Creating split payment checkout session");
+        session = await createSplitPaymentCheckoutSession(
+          contract,
+          clientEmail!,
+          signingToken,
+          splitAmount,
+          targetPaymentNumber,
+          targetPaymentIndex
+        );
+      } else if (paymentType === "incremental_payment" || isIncremental) {
+        // Incremental payment (pay as you go)
+        const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+        const incrementalAmount = amount 
+          ? parseFloat(amount) 
+          : (paymentScheduleConfig?.paymentDates?.[0]?.amount 
+              ? parseFloat(paymentScheduleConfig.paymentDates[0].amount) 
+              : 0);
+        const paymentNum = paymentNumber ? parseInt(paymentNumber) : 1;
+        
+        if (incrementalAmount <= 0) {
+          return NextResponse.json(
+            { message: "Invalid incremental payment amount" },
+            { status: 400 }
+          );
+        }
+        
+        log.info({
+          contractId: contract.id,
+          paymentType: "incremental_payment",
+          paymentSchedule,
+          paymentNumber: paymentNum,
+          amount: incrementalAmount,
+        }, "Creating incremental payment checkout session");
+        session = await createIncrementalPaymentCheckoutSession(
+          contract,
+          clientEmail!,
+          signingToken,
+          incrementalAmount,
+          paymentNum
+        );
+      } else if (paymentType === "full_payment" || isPayInFull || isPayUpfront) {
+        // Full payment (pay in full or pay upfront)
+        log.info({
+          contractId: contract.id,
+          paymentType: "full_payment",
+          paymentSchedule,
+        }, "Creating full payment checkout session");
+        session = await createFullPaymentCheckoutSession(
+          contract,
+          clientEmail!,
+          signingToken
+        );
+      } else if (paymentType === "remaining_balance" || (contract.status === "paid" && contract.depositAmount > 0)) {
+        // Remaining balance payment
+        log.info({
+          contractId: contract.id,
+          paymentType: "remaining_balance",
+        }, "Creating remaining balance checkout session");
+        session = await createRemainingBalanceCheckoutSession(
+          contract,
+          clientEmail!,
+          signingToken
+        );
+      } else {
+        // Deposit payment (default)
+        log.info({
+          contractId: contract.id,
+          paymentType: "deposit",
+        }, "Creating deposit checkout session");
+        session = await createDepositCheckoutSession(
+          contract,
+          clientEmail!,
+          signingToken
+        );
+      }
 
       log.info({
         contractId: contract.id,
         sessionId: session.id,
+        paymentType: paymentType || "deposit",
       }, "Checkout session created successfully");
 
       return NextResponse.json({
@@ -342,7 +480,8 @@ export async function POST(request: Request) {
         contractId: contract.id,
         contractStatus: contract.status,
         error: checkoutError.message,
-      }, "Error in createDepositCheckoutSession");
+        paymentType: paymentType || "deposit",
+      }, "Error creating checkout session");
       
       // Return appropriate error based on the issue
       if (checkoutError.message.includes("must be signed")) {

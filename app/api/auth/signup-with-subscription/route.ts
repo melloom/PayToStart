@@ -4,6 +4,8 @@ import { stripe } from "@/lib/stripe";
 import { db } from "@/lib/db";
 import { TIER_CONFIG, type SubscriptionTier } from "@/lib/types";
 import { checkAPIRateLimit, sanitizeEmail, sanitizeInput, validateContentType, createSecureErrorResponse, getClientIP } from "@/lib/security/api-security";
+import { validateEmail } from "@/lib/security/email-validation";
+import { checkRateLimit } from "@/lib/security/rate-limit";
 import { z } from "zod";
 
 const signupWithSubscriptionSchema = z.object({
@@ -64,6 +66,61 @@ export async function POST(request: Request) {
         { error: "Invalid email", message: "Please provide a valid email address" },
         { status: 400 }
       );
+    }
+
+    // Validate email and check for free email providers
+    const emailValidation = validateEmail(sanitizedEmail);
+    if (!emailValidation.valid) {
+      return NextResponse.json(
+        { error: "Invalid email", message: "Please provide a valid email address" },
+        { status: 400 }
+      );
+    }
+
+    // Check for duplicate email (normalized)
+    const normalizedEmail = emailValidation.normalizedEmail;
+    const existingContractor = await db.contractors.findByNormalizedEmail(normalizedEmail);
+    if (existingContractor) {
+      // Don't reveal if email exists to prevent enumeration, but log it
+      console.warn("Duplicate email attempt detected:", { 
+        original: sanitizedEmail, 
+        normalized: normalizedEmail,
+        existing: existingContractor.email 
+      });
+      return NextResponse.json(
+        { error: "Email exists", message: "An account with this email already exists." },
+        { status: 409 }
+      );
+    }
+
+    // Domain-based rate limiting to prevent spam from same domain
+    const emailDomain = emailValidation.domain;
+    if (emailDomain) {
+      const domainRateLimitKey = `signup:domain:${emailDomain}`;
+      if (checkRateLimit(domainRateLimitKey)) {
+        console.warn("Domain rate limit exceeded for signup:", emailDomain);
+        return NextResponse.json(
+          { 
+            error: "Rate limit exceeded", 
+            message: "Too many signup attempts from this email domain. Please try again later." 
+          },
+          { 
+            status: 429,
+            headers: {
+              "Retry-After": "60",
+            },
+          }
+        );
+      }
+    }
+
+    // Warn about free email providers (but don't block - just log)
+    if (emailValidation.isFreeEmail) {
+      console.info("Free email provider used for signup:", { 
+        email: sanitizedEmail, 
+        domain: emailDomain,
+        ip 
+      });
     }
 
     const sanitizedName = sanitizeInput(name);

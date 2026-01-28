@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { saveSignature, generateContractHash } from "@/lib/signature";
-import { createDepositCheckoutSession } from "@/lib/payments";
+import { createDepositCheckoutSession, createFullPaymentCheckoutSession } from "@/lib/payments";
 import { hashToken, verifyToken, isTokenExpired, getRateLimitConfig, verifyPassword } from "@/lib/security/tokens";
 import { sendEmail } from "@/lib/email";
 import { sendNotificationIfEnabled } from "@/lib/email/notifications";
@@ -460,6 +460,24 @@ export async function POST(
 
     const { fullName, signatureDataUrl, ip, userAgent } = validationResult.data;
 
+    // Check if contract requires signature
+    const requiresSignature = (contract.fieldValues as any)?.requiresSignature !== false; // Default to true for backwards compatibility
+    
+    // Validate signature is provided if required
+    if (requiresSignature && (!signatureDataUrl || signatureDataUrl.trim() === "")) {
+      log.warn({
+        contractId: contract.id,
+        ipAddress,
+      }, "Signature required but not provided");
+      return NextResponse.json(
+        { 
+          message: "A signature is required for this contract. Please draw your signature.",
+          requiresSignature: true
+        },
+        { status: 400 }
+      );
+    }
+
     // Additional security: Sanitize and validate signature data URL
     let sanitizedSignatureUrl: string | null = null;
     if (signatureDataUrl) {
@@ -641,9 +659,30 @@ export async function POST(
       // Continue - event logging failure shouldn't block signing
     }
 
-    // If deposit is required, create Stripe Checkout session (do this quickly before response)
+    // If immediate payment is required (deposit, upfront, or incremental with first payment due now), create Stripe Checkout session
+    // Note: "Pay in full" and incremental payments with future first payment date don't require immediate payment
     let checkoutUrl: string | null = null;
+    const paymentSchedule = (updatedContract.fieldValues as any)?.paymentSchedule;
+    const paymentScheduleConfig = (updatedContract.fieldValues as any)?.paymentScheduleConfig;
+    const isPayUpfront = paymentSchedule === "upfront" && updatedContract.depositAmount === 0 && updatedContract.totalAmount > 0;
+    const isIncremental = paymentSchedule === "incremental";
+    
+    // Check if incremental payment first payment is due immediately (today or in the past)
+    let isIncrementalPaymentDueNow = false;
+    if (isIncremental && paymentScheduleConfig?.firstPaymentDate) {
+      try {
+        const firstPaymentDate = new Date(paymentScheduleConfig.firstPaymentDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        firstPaymentDate.setHours(0, 0, 0, 0);
+        isIncrementalPaymentDueNow = firstPaymentDate <= today;
+      } catch (e) {
+        // Invalid date, don't treat as due now
+      }
+    }
+    
     if (updatedContract.depositAmount > 0) {
+      // Deposit payment required - create checkout immediately
       try {
         // Get client email quickly for checkout
         const client = await db.clients.findById(updatedContract.clientId).catch(() => null);
@@ -659,7 +698,47 @@ export async function POST(
         console.error("[SIGN] Error creating checkout session:", error.message);
         // Don't fail the signing if checkout creation fails - user can still access payment page
       }
+    } else if (isPayUpfront) {
+      // Pay upfront - full payment required immediately upon signing
+      try {
+        // Get client email quickly for checkout
+        const client = await db.clients.findById(updatedContract.clientId).catch(() => null);
+        if (client) {
+          const checkoutSession = await createFullPaymentCheckoutSession(
+            updatedContract,
+            client.email,
+            token
+          );
+          checkoutUrl = checkoutSession.url;
+        }
+      } catch (error: any) {
+        console.error("[SIGN] Error creating upfront payment checkout session:", error.message);
+        // Don't fail the signing if checkout creation fails - user can still access payment page
+      }
+    } else if (isIncremental && isIncrementalPaymentDueNow) {
+      // Incremental payment with first payment due now - create checkout for first payment
+      try {
+        const client = await db.clients.findById(updatedContract.clientId).catch(() => null);
+        if (client && paymentScheduleConfig?.paymentDates?.[0]?.amount) {
+          const paymentAmount = parseFloat(paymentScheduleConfig.paymentDates[0].amount);
+          if (paymentAmount > 0) {
+            const { createIncrementalPaymentCheckoutSession } = await import("@/lib/payments");
+            const checkoutSession = await createIncrementalPaymentCheckoutSession(
+              updatedContract,
+              client.email,
+              token,
+              paymentAmount,
+              1 // First payment
+            );
+            checkoutUrl = checkoutSession.url;
+          }
+        }
+      } catch (error: any) {
+        console.error("[SIGN] Error creating incremental payment checkout session:", error.message);
+        // Don't fail the signing if checkout creation fails - user can still access payment page
+      }
     }
+    // Note: "Pay in full" and incremental payments with future first payment date don't create checkout here
 
     // Return response IMMEDIATELY - don't wait for emails/logging
     const response = NextResponse.json({
@@ -704,9 +783,14 @@ export async function POST(
           }
         }
 
-        // Send "Signed but unpaid" email to client (if deposit required)
-        if (updatedContract.depositAmount > 0 && client && contractor) {
+        // Send "Signed but unpaid" email to client (if deposit or upfront payment required)
+        const paymentSchedule = (updatedContract.fieldValues as any)?.paymentSchedule;
+        const isPayUpfront = paymentSchedule === "upfront" && updatedContract.depositAmount === 0 && updatedContract.totalAmount > 0;
+        const requiresPayment = updatedContract.depositAmount > 0 || isPayUpfront;
+        
+        if (requiresPayment && client && contractor) {
           try {
+            const paymentAmount = isPayUpfront ? updatedContract.totalAmount : updatedContract.depositAmount;
             const { subject, html } = getSignedButUnpaidEmail({
               contractTitle: updatedContract.title,
               contractorName: contractor.name,
@@ -715,8 +799,9 @@ export async function POST(
               clientName: client.name,
               clientEmail: client.email,
               paymentUrl: checkoutUrl || undefined,
-              depositAmount: updatedContract.depositAmount,
+              depositAmount: paymentAmount, // Use full amount for upfront, deposit for partial
               totalAmount: updatedContract.totalAmount,
+              isUpfront: isPayUpfront, // Flag to customize email for upfront payments
             });
 
             await sendEmail({

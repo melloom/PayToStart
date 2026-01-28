@@ -307,6 +307,7 @@ export default function NewContractPage() {
             content: draft.content || "",
             clientId: draft.clientId,
             templateId: draft.templateId,
+            contractType: metadata.contractType || (draft.fieldValues?.contractType as "contract" | "proposal") || "contract", // Restore contract type
             hasCompensation: metadata.hasCompensation ?? false,
             compensationType: metadata.compensationType || "no_compensation",
             paymentTerms: metadata.paymentTerms || "",
@@ -463,6 +464,7 @@ export default function NewContractPage() {
                   paymentTerms: data.paymentTerms,
                   extractedFields: data.extractedFields,
                   detectedClientInfo: data.detectedClientInfo,
+                  contractType: data.contractType || "contract", // Save contract type
                   ...(isAIReview !== undefined && { isAIReview }),
                   ...(aiGenerationParams && { aiGenerationParams }),
                 },
@@ -495,6 +497,66 @@ export default function NewContractPage() {
       return () => clearTimeout(timeoutId);
     }
   }, [step, draftIdFromUrl, data, isInitializing, isLoading, isAIReview, aiGenerationParams]);
+
+  // Save draft when contractType changes to preserve field values
+  useEffect(() => {
+    if (!isInitializing && !isLoading && data.contractType) {
+      const draftId = draftIdFromUrl;
+      const hasData = data.templateId || data.clientId || data.title || data.content || Object.keys(data.fieldValues || {}).length > 0;
+      
+      if (draftId || hasData) {
+        const saveContractType = async () => {
+          try {
+            const response = await fetch('/api/drafts/contracts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...(draftId ? { id: draftId } : {}),
+                title: data.title || "",
+                content: data.content || "",
+                fieldValues: data.fieldValues || {}, // Preserve all field values including terminationTerms and acceptancePeriod
+                customFields: [],
+                depositAmount: parseFloat(data.depositAmount || "0"),
+                totalAmount: parseFloat(data.totalAmount || "0"),
+                clientId: data.clientId,
+                templateId: data.templateId,
+                metadata: {
+                  step: step || 1,
+                  hasCompensation: data.hasCompensation,
+                  compensationType: data.compensationType,
+                  paymentTerms: data.paymentTerms,
+                  extractedFields: data.extractedFields,
+                  detectedClientInfo: data.detectedClientInfo,
+                  contractType: data.contractType, // Save the new contract type
+                  ...(isAIReview !== undefined && { isAIReview }),
+                  ...(aiGenerationParams && { aiGenerationParams }),
+                },
+              }),
+            });
+            if (response.ok) {
+              const result = await response.json();
+              if (result.draft) {
+                const newDraftId = result.draft.id;
+                if (!draftId && newDraftId && typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('draftId', newDraftId);
+                  window.history.replaceState({}, '', url.toString());
+                  if (draftIdFromUrl !== newDraftId) {
+                    setDraftIdFromUrl(newDraftId);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error saving contract type change:", error);
+          }
+        };
+        // Debounce to avoid too many saves
+        const timeoutId = setTimeout(saveContractType, 500);
+        return () => clearTimeout(timeoutId);
+      }
+    }
+  }, [data.contractType, draftIdFromUrl, data, isInitializing, isLoading, step, isAIReview, aiGenerationParams]);
 
   // Scroll to top when step changes - ensure it happens after content renders
   useEffect(() => {
@@ -575,6 +637,12 @@ export default function NewContractPage() {
   };
 
   const handleTemplateSelect = (template: ContractTemplate | null) => {
+    // If there's a draft, it will be replaced when we save
+    // Reset draft loading state since we're starting fresh
+    if (draftIdFromUrl) {
+      loadedDraftIdRef.current = null;
+    }
+    
     if (template) {
       setData({
         ...data,
@@ -593,6 +661,7 @@ export default function NewContractPage() {
       });
     }
     setStep(2);
+    // Save will happen automatically via saveStepToDraft, which will replace existing draft
   };
 
   const handleDefaultTemplateSelect = async (defaultTemplate: any) => {
@@ -674,6 +743,12 @@ export default function NewContractPage() {
     aiContract: { title: string; content: string },
     generationParams?: { description: string; contractType?: string; additionalDetails?: string }
   ) => {
+    // If there's a draft, it will be replaced when we save
+    // Reset draft loading state since we're starting fresh
+    if (draftIdFromUrl) {
+      loadedDraftIdRef.current = null;
+    }
+    
     // Extract fields from the AI-generated contract
     const extractedFields = extractFieldsFromContent(aiContract.content);
     
@@ -947,6 +1022,7 @@ export default function NewContractPage() {
           templateId: dataToSave.templateId,
           metadata: {
             step: stepToSave,
+            contractType: dataToSave.contractType || "contract",
             hasCompensation: dataToSave.hasCompensation,
             compensationType: dataToSave.compensationType,
             paymentTerms: dataToSave.paymentTerms,
@@ -1132,11 +1208,11 @@ export default function NewContractPage() {
       (updatedData as any).insertPaymentIntoContract = insertPaymentIntoContract;
     }
     setData(updatedData);
-    setStep(6);
+    setStep(5); // Go to Style step (step 5), not Preview (step 6)
     
     // Immediately save step to draft so refresh restores correct step
     if (draftIdFromUrl || updatedData.templateId || updatedData.clientId) {
-      saveStepToDraft(6, updatedData);
+      saveStepToDraft(5, updatedData);
     }
   };
 
@@ -1325,8 +1401,36 @@ export default function NewContractPage() {
           setContractType={(type) => {
             setData({ ...data, contractType: type });
             // Refetch templates when contract type changes
-            fetchTemplates();
-            fetchDefaultTemplates();
+            setLoadingTemplates(true);
+            setLoadingDefaultTemplates(true);
+            fetchTemplates(type);
+            fetchDefaultTemplates(type);
+          }}
+          draftId={draftIdFromUrl}
+          onDeleteDraft={async () => {
+            if (draftIdFromUrl) {
+              try {
+                const response = await fetch(`/api/drafts/contracts?id=${draftIdFromUrl}`, {
+                  method: "DELETE",
+                });
+                if (response.ok) {
+                  setDraftIdFromUrl(null);
+                  loadedDraftIdRef.current = null;
+                  router.replace("/dashboard/contracts/new");
+                  toast({
+                    title: "Draft Deleted",
+                    description: "The draft has been deleted successfully.",
+                  });
+                }
+              } catch (error) {
+                console.error("Error deleting draft:", error);
+                toast({
+                  title: "Error",
+                  description: "Failed to delete draft.",
+                  variant: "destructive",
+                });
+              }
+            }
           }}
         />
       )}
@@ -1435,6 +1539,8 @@ function Step1ChooseTemplate({
   hasAIAccess,
   contractType,
   setContractType,
+  draftId,
+  onDeleteDraft,
 }: {
   templates: ContractTemplate[];
   defaultTemplates: any[];
@@ -1447,6 +1553,8 @@ function Step1ChooseTemplate({
   hasAIAccess: boolean | null;
   contractType: "contract" | "proposal";
   setContractType: (type: "contract" | "proposal") => void;
+  draftId?: string | null;
+  onDeleteDraft?: () => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<"default" | "custom" | "scratch" | "ai">("default");
   const [aiDescription, setAiDescription] = useState("");
@@ -1463,11 +1571,48 @@ function Step1ChooseTemplate({
   const [editRequest, setEditRequest] = useState("");
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const [showDraftDialog, setShowDraftDialog] = useState(false);
+  const [pendingContractType, setPendingContractType] = useState<"contract" | "proposal" | null>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isGenerating]);
+
+  // Handle contract type change with draft check
+  const handleContractTypeChange = (type: "contract" | "proposal") => {
+    if (draftId) {
+      // Show dialog if draft exists
+      setPendingContractType(type);
+      setShowDraftDialog(true);
+    } else {
+      // No draft, proceed normally
+      setContractType(type);
+    }
+  };
+
+  // Handle draft dialog actions
+  const handleContinueDraft = () => {
+    setShowDraftDialog(false);
+    setPendingContractType(null);
+    // Draft is already loaded, just continue
+  };
+
+  const handleDeleteDraftAndContinue = async () => {
+    if (onDeleteDraft) {
+      await onDeleteDraft();
+    }
+    setShowDraftDialog(false);
+    if (pendingContractType) {
+      setContractType(pendingContractType);
+    }
+    setPendingContractType(null);
+  };
+
+  const handleCancelDraftDialog = () => {
+    setShowDraftDialog(false);
+    setPendingContractType(null);
+  };
 
   return (
     <Card className="border-2 border-slate-700 shadow-xl bg-slate-800/95 backdrop-blur-sm">
@@ -1481,18 +1626,36 @@ function Step1ChooseTemplate({
         </CardDescription>
       </CardHeader>
       <CardContent className="p-6 space-y-4">
+        {/* Draft Warning Banner */}
+        {draftId && (
+          <div className="p-4 rounded-lg bg-amber-900/20 border-2 border-amber-500/50 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-amber-200 font-semibold mb-1">Draft Detected</p>
+              <p className="text-amber-300/80 text-sm">
+                You have an existing draft. If you select a new template or generate a new contract, it will replace your current draft.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Contract Type Selection */}
         <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700">
           <Label className="text-white font-semibold mb-3 block">Contract Type</Label>
           <div className="flex gap-3">
             <button
-              onClick={() => setContractType("contract")}
-              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+              onClick={() => handleContractTypeChange("contract")}
+              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all relative ${
                 contractType === "contract"
                   ? "border-indigo-500 bg-indigo-600/20 text-white"
                   : "border-slate-600 bg-slate-800/50 text-slate-300 hover:border-slate-500"
               }`}
             >
+              {draftId && (
+                <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center border-2 border-slate-800">
+                  <AlertTriangle className="h-3 w-3 text-white" />
+                </div>
+              )}
               <div className="flex items-center justify-center gap-2">
                 <FileText className="h-5 w-5" />
                 <div className="text-left">
@@ -1502,13 +1665,18 @@ function Step1ChooseTemplate({
               </div>
             </button>
             <button
-              onClick={() => setContractType("proposal")}
-              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+              onClick={() => handleContractTypeChange("proposal")}
+              className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all relative ${
                 contractType === "proposal"
                   ? "border-purple-500 bg-purple-600/20 text-white"
                   : "border-slate-600 bg-slate-800/50 text-slate-300 hover:border-slate-500"
               }`}
             >
+              {draftId && (
+                <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center border-2 border-slate-800">
+                  <AlertTriangle className="h-3 w-3 text-white" />
+                </div>
+              )}
               <div className="flex items-center justify-center gap-2">
                 <Handshake className="h-5 w-5" />
                 <div className="text-left">
@@ -1519,6 +1687,50 @@ function Step1ChooseTemplate({
             </button>
           </div>
         </div>
+
+        {/* Draft Options Dialog */}
+        <Dialog open={showDraftDialog} onOpenChange={setShowDraftDialog}>
+          <DialogContent className="bg-slate-900 border-slate-700 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                Existing Draft Found
+              </DialogTitle>
+              <DialogDescription className="text-slate-400">
+                You have an existing draft. What would you like to do?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
+                <p className="text-sm text-slate-300">
+                  If you continue with a new template or AI generation, your current draft will be replaced.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={handleContinueDraft}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  Continue with Current Draft
+                </Button>
+                <Button
+                  onClick={handleDeleteDraftAndContinue}
+                  variant="outline"
+                  className="w-full border-amber-500/50 text-amber-300 hover:bg-amber-900/30"
+                >
+                  Delete Draft & Start Fresh
+                </Button>
+                <Button
+                  onClick={handleCancelDraftDialog}
+                  variant="ghost"
+                  className="w-full text-slate-400 hover:text-slate-300"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
         {/* Tabs */}
         <div className="flex gap-2 border-b border-slate-700 pb-2">
           <button
@@ -3195,6 +3407,17 @@ function Step3ContractBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.extractedFields]);
 
+  // Initialize field values from data.fieldValues when data changes (e.g., when switching contract types)
+  // This ensures field values like terminationTerms and acceptancePeriod are preserved
+  useEffect(() => {
+    if (data.fieldValues && Object.keys(data.fieldValues).length > 0) {
+      setCustomFieldValues(prev => {
+        // Merge with existing values, but prioritize data.fieldValues to preserve values when switching types
+        return { ...prev, ...data.fieldValues };
+      });
+    }
+  }, [data.fieldValues, data.contractType]); // Re-initialize when contract type changes
+
   // Also extract fields directly from content when we're in step 3 (contract builder)
   // This ensures all fields are captured even if extraction didn't happen earlier
   useEffect(() => {
@@ -3292,6 +3515,7 @@ function Step3ContractBuilder({
             paymentTerms: data.paymentTerms,
             extractedFields: data.extractedFields,
             detectedClientInfo: data.detectedClientInfo,
+            contractType: data.contractType || "contract", // Save contract type
           },
         }),
       });
@@ -4820,40 +5044,43 @@ function Step3ContractBuilder({
                 Fill Template Fields
               </CardTitle>
               <CardDescription className="text-slate-400 mt-1">
-                Enter values for the template fields
+                Fill in the fields below
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-6 space-y-4">
-            {template.fields.map((field, index) => (
-              <div key={`template-${field.id}-${index}`} className="space-y-2">
-                <Label htmlFor={field.id} className="text-slate-300">
-                  {field.label} {field.required && <span className="text-red-400">*</span>}
-                </Label>
-                {field.type === "textarea" ? (
-                  <Textarea
-                    id={field.id}
-                    className="bg-slate-700/50 border-slate-600 text-white"
-                    value={values[field.id] || ""}
-                    onChange={(e) => setValues({ ...values, [field.id]: e.target.value })}
-                    placeholder={field.placeholder}
-                    required={field.required}
-                  />
-                ) : (
-                  <Input
-                    id={field.id}
-                    type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
-                    className="bg-slate-700/50 border-slate-600 text-white"
-                    value={values[field.id] || ""}
-                    onChange={(e) => setValues({ ...values, [field.id]: e.target.value })}
-                    placeholder={field.placeholder}
-                    required={field.required}
-                  />
-                )}
-              </div>
-            ))}
-            
-            {/* Compensation Section */}
-            <div className="pt-4 border-t border-slate-700 space-y-4">
+            <CardContent className="p-6 flex flex-col max-h-[calc(100vh-180px)]">
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {template.fields.map((field, index) => (
+                    <div key={`template-${field.id}-${index}`} className={`space-y-2 ${field.type === "textarea" ? "md:col-span-2" : ""}`}>
+                      <Label htmlFor={field.id} className="text-slate-300">
+                        {field.label} {field.required && <span className="text-red-400">*</span>}
+                      </Label>
+                      {field.type === "textarea" ? (
+                        <Textarea
+                          id={field.id}
+                          className="bg-slate-700/50 border-slate-600 text-white"
+                          value={values[field.id] || ""}
+                          onChange={(e) => setValues({ ...values, [field.id]: e.target.value })}
+                          placeholder={field.placeholder}
+                          required={field.required}
+                        />
+                      ) : (
+                        <Input
+                          id={field.id}
+                          type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
+                          className="bg-slate-700/50 border-slate-600 text-white"
+                          value={values[field.id] || ""}
+                          onChange={(e) => setValues({ ...values, [field.id]: e.target.value })}
+                          placeholder={field.placeholder}
+                          required={field.required}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              
+              {/* Compensation Section */}
+              <div className="pt-4 border-t border-slate-700 space-y-4 mt-4">
               <div className="flex items-start gap-3 p-4 bg-slate-700/30 rounded-lg border border-slate-600">
                 <Checkbox
                   id="hasCompensation"
@@ -4932,12 +5159,24 @@ function Step3ContractBuilder({
                           </button>
                         </div>
                         {compensationType && compensationType !== "no_compensation" && (
-                          <p className="text-xs text-indigo-400 mt-1">
-                            Selected: {compensationType === "fixed_amount" && "Fixed Amount"}
-                            {compensationType === "hourly" && "Hourly Rate"}
-                            {compensationType === "milestone" && "Milestone-Based"}
-                            {compensationType === "other" && "Other"}
-                          </p>
+                          <div className="mt-2">
+                            <p className="text-xs text-indigo-400 mb-2">
+                              Selected: {compensationType === "fixed_amount" && "Fixed Amount"}
+                              {compensationType === "hourly" && "Hourly Rate"}
+                              {compensationType === "milestone" && "Milestone-Based"}
+                              {compensationType === "other" && "Other"}
+                            </p>
+                            {compensationType !== "fixed_amount" && (
+                              <div className="p-2 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                                <p className="text-xs text-amber-300 flex items-start gap-2">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                                  <span>
+                                    <strong>Note:</strong> Payment processing through our system is only available for &quot;Fixed Amount&quot; contracts. You can still include {compensationType === "hourly" ? "hourly rate" : compensationType === "milestone" ? "milestone-based" : "this"} compensation in your contract text, but payment setup and automated processing will not be available.
+                                  </span>
+                                </p>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                       <div className="space-y-2">
@@ -5015,10 +5254,11 @@ function Step3ContractBuilder({
                   )}
                 </div>
               </div>
-            </div>
+              </div>
+              </div>
 
-            <div className="flex justify-between pt-4 border-t border-slate-700">
-              <Button 
+              <div className="flex justify-between pt-4 border-t border-slate-700 mt-4 flex-shrink-0">
+                <Button 
                 variant="outline" 
                 onClick={onBack}
                 className="border-slate-600 text-slate-300 hover:bg-slate-700"
@@ -6057,12 +6297,24 @@ function Step3ContractBuilder({
                           </button>
                         </div>
                         {compensationType && compensationType !== "no_compensation" && (
-                          <p className="text-xs text-indigo-400 mt-1">
-                            Selected: {compensationType === "fixed_amount" && "Fixed Amount"}
-                            {compensationType === "hourly" && "Hourly Rate"}
-                            {compensationType === "milestone" && "Milestone-Based"}
-                            {compensationType === "other" && "Other"}
-                          </p>
+                          <div className="mt-2">
+                            <p className="text-xs text-indigo-400 mb-2">
+                              Selected: {compensationType === "fixed_amount" && "Fixed Amount"}
+                              {compensationType === "hourly" && "Hourly Rate"}
+                              {compensationType === "milestone" && "Milestone-Based"}
+                              {compensationType === "other" && "Other"}
+                            </p>
+                            {compensationType !== "fixed_amount" && (
+                              <div className="p-2 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                                <p className="text-xs text-amber-300 flex items-start gap-2">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                                  <span>
+                                    <strong>Note:</strong> Payment processing through our system is only available for &quot;Fixed Amount&quot; contracts. You can still include {compensationType === "hourly" ? "hourly rate" : compensationType === "milestone" ? "milestone-based" : "this"} compensation in your contract text, but payment setup and automated processing will not be available.
+                                  </span>
+                                </p>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                       <div className="space-y-2">
@@ -6622,8 +6874,11 @@ function Step4SetAmounts({
     paymentDates?: Array<{ date: string; amount: string; percentage?: string }>;
     depositPercentage?: string;
     balanceDueDate?: string;
+    customBalanceDueDate?: string; // Store the actual date value when custom is selected
     paymentFrequency?: "weekly" | "biweekly" | "monthly" | "quarterly";
     firstPaymentDate?: string;
+    includeUpfrontOffer?: boolean; // For proposals: include upfront payment offer
+    upfrontOfferAmount?: string; // Amount of upfront offer
   }>({});
   const [requirePaymentAfterSigning, setRequirePaymentAfterSigning] = useState(true);
   const [paymentAfterSigningAmount, setPaymentAfterSigningAmount] = useState("");
@@ -6950,6 +7205,88 @@ function Step4SetAmounts({
           </div>
         )}
 
+        {/* Upfront Payment Offer Option (Proposals Only) */}
+        {isProposal && (
+          <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="includeUpfrontOffer"
+                  checked={scheduleConfig.includeUpfrontOffer || false}
+                  onCheckedChange={(checked) => {
+                    setScheduleConfig({
+                      ...scheduleConfig,
+                      includeUpfrontOffer: checked as boolean,
+                      upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                    });
+                  }}
+                  className="border-slate-600"
+                />
+                <Label htmlFor="includeUpfrontOffer" className="text-sm font-semibold text-white cursor-pointer">
+                  Include Upfront Payment Offer with Proposal
+                </Label>
+              </div>
+            </div>
+            {scheduleConfig.includeUpfrontOffer && (
+              <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                <p className="text-xs text-slate-300">
+                  💡 Send a payment offer along with the proposal. The client will see this upfront offer amount in the proposal email.
+                </p>
+                <div className="space-y-2">
+                  <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={scheduleConfig.upfrontOfferAmount || ""}
+                        onChange={(e) => {
+                          const amount = e.target.value;
+                          setScheduleConfig({
+                            ...scheduleConfig,
+                            upfrontOfferAmount: amount,
+                          });
+                        }}
+                        className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                        required={scheduleConfig.includeUpfrontOffer}
+                      />
+                    </div>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        step="0.1"
+                        placeholder="%"
+                        value={
+                          scheduleConfig.upfrontOfferAmount && total
+                            ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const pct = parseFloat(e.target.value);
+                          if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                            setScheduleConfig({
+                              ...scheduleConfig,
+                              upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                            });
+                          }
+                        }}
+                        className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    This amount will be prominently displayed in the proposal email as an upfront payment offer.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Compensation Type Display */}
         {compensationType && compensationType !== "no_compensation" && (
           <div className="p-4 rounded-lg bg-indigo-900/20 border border-indigo-500/30">
@@ -6963,6 +7300,18 @@ function Step4SetAmounts({
               {compensationType === "hourly" && "Hourly Rate"}
               {compensationType === "milestone" && "Milestone-Based"}
               {compensationType === "other" && "Other"}
+            </p>
+          </div>
+        )}
+
+        {/* Warning for non-fixed amount compensation types */}
+        {compensationType && compensationType !== "fixed_amount" && compensationType !== "no_compensation" && (
+          <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50 mb-4">
+            <p className="text-sm text-amber-300 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
+              <span>
+                <strong>Payment Processing Note:</strong> Payment processing through our system is only available for &quot;Fixed Amount&quot; contracts. You can still include {compensationType === "hourly" ? "hourly rate" : compensationType === "milestone" ? "milestone-based" : "this"} compensation in your contract text, but payment setup and automated processing will not be available.
+              </span>
             </p>
           </div>
         )}
@@ -7542,6 +7891,84 @@ function Step4SetAmounts({
                         <span className="text-xl font-bold text-indigo-400">${parseFloat(total || "0").toFixed(2)}</span>
                       </div>
                     </div>
+
+                    {/* Upfront Payment Offer (Proposals Only) */}
+                    {isProposal && (
+                      <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3 mt-4">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="upfront-offer-upfront"
+                            checked={scheduleConfig.includeUpfrontOffer || false}
+                            onCheckedChange={(checked) => {
+                              setScheduleConfig({
+                                ...scheduleConfig,
+                                includeUpfrontOffer: checked as boolean,
+                                upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                              });
+                            }}
+                            className="border-slate-600 mt-1"
+                          />
+                          <Label htmlFor="upfront-offer-upfront" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                            Include Upfront Payment Offer
+                          </Label>
+                        </div>
+                        {scheduleConfig.includeUpfrontOffer && (
+                          <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    value={scheduleConfig.upfrontOfferAmount || ""}
+                                    onChange={(e) => {
+                                      setScheduleConfig({
+                                        ...scheduleConfig,
+                                        upfrontOfferAmount: e.target.value,
+                                      });
+                                    }}
+                                    className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                                    required={scheduleConfig.includeUpfrontOffer}
+                                  />
+                                </div>
+                                <div className="relative">
+                                  <Input
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="%"
+                                    value={
+                                      scheduleConfig.upfrontOfferAmount && total
+                                        ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                                        : ""
+                                    }
+                                    onChange={(e) => {
+                                      const pct = parseFloat(e.target.value);
+                                      if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                                        setScheduleConfig({
+                                          ...scheduleConfig,
+                                          upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                                        });
+                                      }
+                                    }}
+                                    className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                              <p className="text-xs text-amber-300">
+                                <strong>Payment Coordination:</strong> You will need to send payment manually after the proposal is accepted. Coordinate payment outside the system or set up Stripe Connect for automated transfers (coming soon).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -7640,6 +8067,84 @@ function Step4SetAmounts({
                         />
                       )}
                     </div>
+
+                    {/* Upfront Payment Offer (Proposals Only) */}
+                    {isProposal && (
+                      <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3 mt-4">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="upfront-offer-partial"
+                            checked={scheduleConfig.includeUpfrontOffer || false}
+                            onCheckedChange={(checked) => {
+                              setScheduleConfig({
+                                ...scheduleConfig,
+                                includeUpfrontOffer: checked as boolean,
+                                upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                              });
+                            }}
+                            className="border-slate-600 mt-1"
+                          />
+                          <Label htmlFor="upfront-offer-partial" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                            Include Upfront Payment Offer
+                          </Label>
+                        </div>
+                        {scheduleConfig.includeUpfrontOffer && (
+                          <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    value={scheduleConfig.upfrontOfferAmount || ""}
+                                    onChange={(e) => {
+                                      setScheduleConfig({
+                                        ...scheduleConfig,
+                                        upfrontOfferAmount: e.target.value,
+                                      });
+                                    }}
+                                    className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                                    required={scheduleConfig.includeUpfrontOffer}
+                                  />
+                                </div>
+                                <div className="relative">
+                                  <Input
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="%"
+                                    value={
+                                      scheduleConfig.upfrontOfferAmount && total
+                                        ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                                        : ""
+                                    }
+                                    onChange={(e) => {
+                                      const pct = parseFloat(e.target.value);
+                                      if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                                        setScheduleConfig({
+                                          ...scheduleConfig,
+                                          upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                                        });
+                                      }
+                                    }}
+                                    className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                              <p className="text-xs text-amber-300">
+                                <strong>Payment Coordination:</strong> You will need to send payment manually after the proposal is accepted. Coordinate payment outside the system or set up Stripe Connect for automated transfers (coming soon).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -7651,8 +8156,18 @@ function Step4SetAmounts({
                         {isProposal ? "Compensation Due Date" : "Payment Due Date"}
                       </Label>
                       <select
-                        value={scheduleConfig.balanceDueDate || "upon_completion"}
-                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, balanceDueDate: e.target.value })}
+                        value={
+                          scheduleConfig.balanceDueDate && /^\d{4}-\d{2}-\d{2}$/.test(scheduleConfig.balanceDueDate)
+                            ? "custom"
+                            : (scheduleConfig.balanceDueDate || "upon_completion")
+                        }
+                        onChange={(e) => {
+                          if (e.target.value === "custom") {
+                            setScheduleConfig({ ...scheduleConfig, balanceDueDate: "custom" });
+                          } else {
+                            setScheduleConfig({ ...scheduleConfig, balanceDueDate: e.target.value, customBalanceDueDate: undefined });
+                          }
+                        }}
                         className="w-full bg-slate-800 border-slate-600 text-white rounded-md px-3 py-2"
                       >
                         <option value="upon_completion">Upon completion and acceptance</option>
@@ -7662,11 +8177,18 @@ function Step4SetAmounts({
                         <option value="net_30">Net 30 days after completion</option>
                         <option value="custom">Custom date</option>
                       </select>
-                      {scheduleConfig.balanceDueDate === "custom" && (
+                      {(scheduleConfig.balanceDueDate === "custom" || (scheduleConfig.balanceDueDate && /^\d{4}-\d{2}-\d{2}$/.test(scheduleConfig.balanceDueDate))) && (
                         <Input
                           type="date"
-                          value={scheduleConfig.balanceDueDate || ""}
-                          onChange={(e) => setScheduleConfig({ ...scheduleConfig, balanceDueDate: e.target.value })}
+                          value={scheduleConfig.customBalanceDueDate || scheduleConfig.balanceDueDate || ""}
+                          onChange={(e) => {
+                            const dateValue = e.target.value;
+                            setScheduleConfig({ 
+                              ...scheduleConfig, 
+                              customBalanceDueDate: dateValue,
+                              balanceDueDate: dateValue // Store the actual date when custom is selected
+                            });
+                          }}
                           className="bg-slate-800 border-slate-600 text-white"
                         />
                       )}
@@ -7679,14 +8201,108 @@ function Step4SetAmounts({
                         <span className="text-xl font-bold text-indigo-400">${parseFloat(total || "0").toFixed(2)}</span>
                       </div>
                     </div>
+
+                    {/* Upfront Payment Offer (Proposals Only) */}
+                    {isProposal && (
+                      <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3 mt-4">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="upfront-offer-full"
+                            checked={scheduleConfig.includeUpfrontOffer || false}
+                            onCheckedChange={(checked) => {
+                              setScheduleConfig({
+                                ...scheduleConfig,
+                                includeUpfrontOffer: checked as boolean,
+                                upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                              });
+                            }}
+                            className="border-slate-600 mt-1"
+                          />
+                          <Label htmlFor="upfront-offer-full" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                            Include Upfront Payment Offer
+                          </Label>
+                        </div>
+                        {scheduleConfig.includeUpfrontOffer && (
+                          <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    value={scheduleConfig.upfrontOfferAmount || ""}
+                                    onChange={(e) => {
+                                      setScheduleConfig({
+                                        ...scheduleConfig,
+                                        upfrontOfferAmount: e.target.value,
+                                      });
+                                    }}
+                                    className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                                    required={scheduleConfig.includeUpfrontOffer}
+                                  />
+                                </div>
+                                <div className="relative">
+                                  <Input
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="%"
+                                    value={
+                                      scheduleConfig.upfrontOfferAmount && total
+                                        ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                                        : ""
+                                    }
+                                    onChange={(e) => {
+                                      const pct = parseFloat(e.target.value);
+                                      if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                                        setScheduleConfig({
+                                          ...scheduleConfig,
+                                          upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                                        });
+                                      }
+                                    }}
+                                    className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                              <p className="text-xs text-amber-300">
+                                <strong>Payment Coordination:</strong> You will need to send payment manually after the proposal is accepted. Coordinate payment outside the system or set up Stripe Connect for automated transfers (coming soon).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Split Payments Configuration */}
                 {paymentSchedule === "split" && (
                   <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-indigo-900/20 border border-indigo-500/30">
+                      <div className="flex items-start gap-3">
+                        <Info className="h-5 w-5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-slate-300">
+                          <p className="font-semibold text-indigo-400 mb-1">Multiple Installments</p>
+                          <p>
+                            {isProposal 
+                              ? "Divide the total compensation into multiple payments. Set the number of payments, amounts, and due dates for each installment."
+                              : "Divide the total into multiple payments. Set the number of payments, amounts, and due dates for each installment."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
                     <div className="space-y-2">
-                      <Label className="text-slate-300 font-medium">Number of Payments</Label>
+                      <Label className="text-slate-300 font-medium">
+                        Number of Payments *
+                      </Label>
                       <Input
                         type="number"
                         min="2"
@@ -7694,82 +8310,140 @@ function Step4SetAmounts({
                         value={scheduleConfig.numberOfPayments || "2"}
                         onChange={(e) => {
                           const num = parseInt(e.target.value) || 2;
+                          const totalNum = parseFloat(total || "0");
+                          const equalAmount = totalNum > 0 ? (totalNum / num).toFixed(2) : "0.00";
+                          
+                          // Create payments array with equal amounts by default
                           const payments = Array.from({ length: num }, (_, i) => ({
                             date: scheduleConfig.paymentDates?.[i]?.date || "",
-                            amount: scheduleConfig.paymentDates?.[i]?.amount || "",
-                            percentage: scheduleConfig.paymentDates?.[i]?.percentage || "",
+                            amount: scheduleConfig.paymentDates?.[i]?.amount || equalAmount,
+                            percentage: scheduleConfig.paymentDates?.[i]?.percentage || ((100 / num).toFixed(1)),
                           }));
                           setScheduleConfig({ ...scheduleConfig, numberOfPayments: num, paymentDates: payments });
                         }}
                         className="bg-slate-800 border-slate-600 text-white"
+                        required
                       />
                       <p className="text-xs text-slate-500">
-                        {isProposal 
-                          ? "Divide the total compensation into 2-12 equal or custom payments"
-                          : "Divide the total into 2-12 equal or custom payments"}
+                        Choose between 2-12 payments. Amounts will be divided equally by default.
                       </p>
                     </div>
+                    
+                    {scheduleConfig.numberOfPayments && scheduleConfig.numberOfPayments > 0 && (
+                      <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const num = scheduleConfig.numberOfPayments || 2;
+                            const totalNum = parseFloat(total || "0");
+                            const equalAmount = (totalNum / num).toFixed(2);
+                            const equalPercentage = (100 / num).toFixed(1);
+                            
+                            const payments = Array.from({ length: num }, (_, i) => ({
+                              date: scheduleConfig.paymentDates?.[i]?.date || "",
+                              amount: equalAmount,
+                              percentage: equalPercentage,
+                            }));
+                            setScheduleConfig({ ...scheduleConfig, paymentDates: payments });
+                            toast({
+                              title: "Payments Equalized",
+                              description: `All ${num} payments set to $${equalAmount} each`,
+                            });
+                          }}
+                          className="text-xs border-slate-600 text-slate-300 hover:bg-slate-700"
+                        >
+                          Make All Equal
+                        </Button>
+                        <span className="text-xs text-slate-400">
+                          Equal amount: ${((parseFloat(total || "0") / (scheduleConfig.numberOfPayments || 2))).toFixed(2)} per payment
+                        </span>
+                      </div>
+                    )}
                     {scheduleConfig.numberOfPayments && scheduleConfig.numberOfPayments > 0 && (
                       <div className="space-y-3">
-                        <Label className="text-slate-300 font-medium">
-                          {isProposal ? "Compensation Schedule" : "Payment Schedule"}
-                        </Label>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-slate-300 font-medium">
+                            {isProposal ? "Compensation Schedule" : "Payment Schedule"} *
+                          </Label>
+                          <span className="text-xs text-slate-400">
+                            {scheduleConfig.numberOfPayments} {scheduleConfig.numberOfPayments === 1 ? "payment" : "payments"}
+                          </span>
+                        </div>
                         {Array.from({ length: scheduleConfig.numberOfPayments }).map((_, index) => {
                           const payment = scheduleConfig.paymentDates?.[index] || { date: "", amount: "", percentage: "" };
                           const equalAmount = (parseFloat(total || "0") / (scheduleConfig.numberOfPayments || 2)).toFixed(2);
                           return (
-                            <div key={index} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 space-y-2">
+                            <div key={index} className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 space-y-3">
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="text-sm font-medium text-indigo-400">
-                                  {isProposal ? "Compensation" : "Payment"} {index + 1}
+                                <span className="text-sm font-semibold text-indigo-400">
+                                  {isProposal ? "Compensation" : "Payment"} {index + 1} of {scheduleConfig.numberOfPayments}
                                 </span>
                               </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-slate-400">Amount ($) *</Label>
+                                  <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      min="0.01"
+                                      placeholder={equalAmount}
+                                      value={payment.amount || ""}
+                                      onChange={(e) => {
+                                        const amt = e.target.value;
+                                        const totalNum = parseFloat(total || "0");
+                                        const pct = totalNum > 0 ? ((parseFloat(amt || "0") / totalNum) * 100).toFixed(1) : "";
+                                        const newPayments = [...(scheduleConfig.paymentDates || [])];
+                                        newPayments[index] = { ...payment, amount: amt, percentage: pct };
+                                        setScheduleConfig({ ...scheduleConfig, paymentDates: newPayments });
+                                      }}
+                                      className="pl-8 bg-slate-700 border-slate-600 text-white"
+                                      required
+                                    />
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-slate-400">Percentage (%)</Label>
+                                  <div className="relative">
+                                    <Input
+                                      type="number"
+                                      step="0.1"
+                                      min="0.1"
+                                      max="100"
+                                      placeholder={(100 / (scheduleConfig.numberOfPayments || 2)).toFixed(1)}
+                                      value={payment.percentage || ""}
+                                      onChange={(e) => {
+                                        const pct = parseFloat(e.target.value);
+                                        if (!isNaN(pct) && pct > 0 && pct <= 100) {
+                                          const totalNum = parseFloat(total || "0");
+                                          const amt = (totalNum * pct / 100).toFixed(2);
+                                          const newPayments = [...(scheduleConfig.paymentDates || [])];
+                                          newPayments[index] = { ...payment, amount: amt, percentage: e.target.value };
+                                          setScheduleConfig({ ...scheduleConfig, paymentDates: newPayments });
+                                        }
+                                      }}
+                                      className="bg-slate-700 border-slate-600 text-white pr-8"
+                                    />
+                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-slate-400">Due Date *</Label>
                                   <Input
-                                    type="number"
-                                    step="0.01"
-                                    placeholder={equalAmount}
-                                    value={payment.amount || ""}
+                                    type="date"
+                                    value={payment.date || ""}
                                     onChange={(e) => {
                                       const newPayments = [...(scheduleConfig.paymentDates || [])];
-                                      newPayments[index] = { ...payment, amount: e.target.value };
+                                      newPayments[index] = { ...payment, date: e.target.value };
                                       setScheduleConfig({ ...scheduleConfig, paymentDates: newPayments });
                                     }}
-                                    className="pl-6 bg-slate-700 border-slate-600 text-white text-sm"
+                                    className="bg-slate-700 border-slate-600 text-white"
+                                    required
                                   />
                                 </div>
-                                <div className="relative">
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    placeholder="%"
-                                    value={payment.percentage || ""}
-                                    onChange={(e) => {
-                                      const pct = parseFloat(e.target.value);
-                                      if (!isNaN(pct) && pct > 0 && pct <= 100) {
-                                        const amt = (parseFloat(total || "0") * pct / 100).toFixed(2);
-                                        const newPayments = [...(scheduleConfig.paymentDates || [])];
-                                        newPayments[index] = { ...payment, amount: amt, percentage: e.target.value };
-                                        setScheduleConfig({ ...scheduleConfig, paymentDates: newPayments });
-                                      }
-                                    }}
-                                    className="bg-slate-700 border-slate-600 text-white text-sm"
-                                  />
-                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
-                                </div>
-                                <Input
-                                  type="date"
-                                  placeholder="Due date"
-                                  value={payment.date || ""}
-                                  onChange={(e) => {
-                                    const newPayments = [...(scheduleConfig.paymentDates || [])];
-                                    newPayments[index] = { ...payment, date: e.target.value };
-                                    setScheduleConfig({ ...scheduleConfig, paymentDates: newPayments });
-                                  }}
-                                  className="bg-slate-700 border-slate-600 text-white text-sm"
-                                />
                               </div>
                             </div>
                           );
@@ -7789,15 +8463,107 @@ function Step4SetAmounts({
                         </div>
                       </div>
                     )}
+
+                    {/* Upfront Payment Offer (Proposals Only) */}
+                    {isProposal && (
+                      <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3 mt-4">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="upfront-offer-split"
+                            checked={scheduleConfig.includeUpfrontOffer || false}
+                            onCheckedChange={(checked) => {
+                              setScheduleConfig({
+                                ...scheduleConfig,
+                                includeUpfrontOffer: checked as boolean,
+                                upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                              });
+                            }}
+                            className="border-slate-600 mt-1"
+                          />
+                          <Label htmlFor="upfront-offer-split" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                            Include Upfront Payment Offer
+                          </Label>
+                        </div>
+                        {scheduleConfig.includeUpfrontOffer && (
+                          <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    value={scheduleConfig.upfrontOfferAmount || ""}
+                                    onChange={(e) => {
+                                      setScheduleConfig({
+                                        ...scheduleConfig,
+                                        upfrontOfferAmount: e.target.value,
+                                      });
+                                    }}
+                                    className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                                    required={scheduleConfig.includeUpfrontOffer}
+                                  />
+                                </div>
+                                <div className="relative">
+                                  <Input
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="%"
+                                    value={
+                                      scheduleConfig.upfrontOfferAmount && total
+                                        ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                                        : ""
+                                    }
+                                    onChange={(e) => {
+                                      const pct = parseFloat(e.target.value);
+                                      if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                                        setScheduleConfig({
+                                          ...scheduleConfig,
+                                          upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                                        });
+                                      }
+                                    }}
+                                    className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                              <p className="text-xs text-amber-300">
+                                <strong>Payment Coordination:</strong> You will need to send payment manually after the proposal is accepted. Coordinate payment outside the system or set up Stripe Connect for automated transfers (coming soon).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Incremental Configuration */}
                 {paymentSchedule === "incremental" && (
                   <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-indigo-900/20 border border-indigo-500/30">
+                      <div className="flex items-start gap-3">
+                        <Info className="h-5 w-5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm text-slate-300">
+                          <p className="font-semibold text-indigo-400 mb-1">Pay as You Go</p>
+                          <p>
+                            {isProposal 
+                              ? "Client pays based on progress or time. Set payment frequency and when payments begin."
+                              : "Client pays based on progress or time. Set payment frequency and when payments begin."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
                     <div className="space-y-2">
                       <Label className="text-slate-300 font-medium">
-                        {isProposal ? "Compensation Frequency" : "Payment Frequency"}
+                        {isProposal ? "Compensation Frequency" : "Payment Frequency"} *
                       </Label>
                       <select
                         value={scheduleConfig.paymentFrequency || "monthly"}
@@ -7809,43 +8575,173 @@ function Step4SetAmounts({
                         <option value="monthly">Monthly</option>
                         <option value="quarterly">Quarterly (Every 3 months)</option>
                       </select>
+                      <p className="text-xs text-slate-500">
+                        How often {isProposal ? "compensation" : "payments"} will be due
+                      </p>
                     </div>
+                    
                     <div className="space-y-2">
                       <Label className="text-slate-300 font-medium">
-                        {isProposal ? "First Compensation Date" : "First Payment Date"}
+                        {isProposal ? "First Compensation Date" : "First Payment Date"} *
                       </Label>
                       <Input
                         type="date"
                         value={scheduleConfig.firstPaymentDate || ""}
-                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, firstPaymentDate: e.target.value })}
+                        onChange={(e) => {
+                          const dateValue = e.target.value;
+                          setScheduleConfig({ 
+                            ...scheduleConfig, 
+                            firstPaymentDate: dateValue,
+                            // Update paymentDates with the new date
+                            paymentDates: scheduleConfig.paymentDates?.length 
+                              ? [{ ...scheduleConfig.paymentDates[0], date: dateValue }]
+                              : [{ date: dateValue, amount: scheduleConfig.paymentDates?.[0]?.amount || "", percentage: "" }]
+                          });
+                        }}
                         className="bg-slate-800 border-slate-600 text-white"
+                        required
                       />
+                      <p className="text-xs text-slate-500">
+                        When the first {isProposal ? "compensation" : "payment"} is due
+                      </p>
                     </div>
+                    
                     <div className="space-y-2">
                       <Label className="text-slate-300 font-medium">
-                        {isProposal ? "Compensation Amount per Period" : "Payment Amount per Period"}
+                        {isProposal ? "Compensation Amount per Period" : "Payment Amount per Period"} *
                       </Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                         <Input
                           type="number"
                           step="0.01"
-                          placeholder="Amount per payment period"
+                          min="0.01"
+                          placeholder="0.00"
                           value={scheduleConfig.paymentDates?.[0]?.amount || ""}
                           onChange={(e) => {
-                            const payments = [{ date: scheduleConfig.firstPaymentDate || "", amount: e.target.value, percentage: "" }];
+                            const amount = e.target.value;
+                            const payments = [{ 
+                              date: scheduleConfig.firstPaymentDate || "", 
+                              amount: amount, 
+                              percentage: "" 
+                            }];
                             setScheduleConfig({ ...scheduleConfig, paymentDates: payments });
                           }}
                           className="pl-8 bg-slate-800 border-slate-600 text-white"
+                          required
                         />
                       </div>
                       <p className="text-xs text-slate-500">
-                        {isProposal ? "You will pay" : "Client will pay"} this amount {scheduleConfig.paymentFrequency === "weekly" && "every week"}
+                        {isProposal ? "You will pay" : "Client will pay"} <strong>${scheduleConfig.paymentDates?.[0]?.amount || "0.00"}</strong> {scheduleConfig.paymentFrequency === "weekly" && "every week"}
                         {scheduleConfig.paymentFrequency === "biweekly" && "every 2 weeks"}
                         {scheduleConfig.paymentFrequency === "monthly" && "every month"}
                         {scheduleConfig.paymentFrequency === "quarterly" && "every 3 months"}
+                        {scheduleConfig.firstPaymentDate && `, starting ${new Date(scheduleConfig.firstPaymentDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`}
                       </p>
                     </div>
+                    
+                    {scheduleConfig.paymentDates?.[0]?.amount && parseFloat(scheduleConfig.paymentDates[0].amount) > 0 && (
+                      <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-300">
+                            {isProposal ? "Amount per Period:" : "Payment per Period:"}
+                          </span>
+                          <span className="text-lg font-bold text-indigo-400">
+                            ${parseFloat(scheduleConfig.paymentDates[0].amount || "0").toFixed(2)}
+                          </span>
+                        </div>
+                        {total && parseFloat(total) > 0 && (
+                          <div className="mt-2 pt-2 border-t border-slate-700">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-slate-400">
+                                Estimated number of payments:
+                              </span>
+                              <span className="text-slate-300">
+                                ~{Math.ceil(parseFloat(total) / parseFloat(scheduleConfig.paymentDates[0].amount || "1"))} payments
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Upfront Payment Offer (Proposals Only) */}
+                    {isProposal && (
+                      <div className="p-4 bg-emerald-900/20 border border-emerald-700/50 rounded-lg space-y-3 mt-4">
+                        <div className="flex items-start gap-2">
+                          <Checkbox
+                            id="upfront-offer-incremental"
+                            checked={scheduleConfig.includeUpfrontOffer || false}
+                            onCheckedChange={(checked) => {
+                              setScheduleConfig({
+                                ...scheduleConfig,
+                                includeUpfrontOffer: checked as boolean,
+                                upfrontOfferAmount: checked ? scheduleConfig.upfrontOfferAmount || "" : "",
+                              });
+                            }}
+                            className="border-slate-600 mt-1"
+                          />
+                          <Label htmlFor="upfront-offer-incremental" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                            Include Upfront Payment Offer
+                          </Label>
+                        </div>
+                        {scheduleConfig.includeUpfrontOffer && (
+                          <div className="pl-7 space-y-3 border-l-2 border-emerald-500/30">
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Upfront Offer Amount *</Label>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    placeholder="0.00"
+                                    value={scheduleConfig.upfrontOfferAmount || ""}
+                                    onChange={(e) => {
+                                      setScheduleConfig({
+                                        ...scheduleConfig,
+                                        upfrontOfferAmount: e.target.value,
+                                      });
+                                    }}
+                                    className="pl-8 bg-slate-700/50 border-slate-600 text-white"
+                                    required={scheduleConfig.includeUpfrontOffer}
+                                  />
+                                </div>
+                                <div className="relative">
+                                  <Input
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="%"
+                                    value={
+                                      scheduleConfig.upfrontOfferAmount && total
+                                        ? ((parseFloat(scheduleConfig.upfrontOfferAmount) / parseFloat(total)) * 100).toFixed(1)
+                                        : ""
+                                    }
+                                    onChange={(e) => {
+                                      const pct = parseFloat(e.target.value);
+                                      if (!isNaN(pct) && pct > 0 && pct <= 100 && total) {
+                                        setScheduleConfig({
+                                          ...scheduleConfig,
+                                          upfrontOfferAmount: (parseFloat(total) * pct / 100).toFixed(2),
+                                        });
+                                      }
+                                    }}
+                                    className="bg-slate-700/50 border-slate-600 text-white pr-8"
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">%</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/50">
+                              <p className="text-xs text-amber-300">
+                                <strong>Payment Coordination:</strong> You will need to send payment manually after the proposal is accepted. Coordinate payment outside the system or set up Stripe Connect for automated transfers (coming soon).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -8213,16 +9109,38 @@ function Step5Styling({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch subscription tier
-    fetch("/api/account")
+    // Fetch subscription tier using the correct endpoint that gets effective tier
+    fetch("/api/subscriptions/current-tier")
       .then(res => res.json())
       .then(result => {
-        if (result.company) {
-          setSubscriptionTier(result.company.subscriptionTier || "free");
+        if (result.tier) {
+          setSubscriptionTier(result.tier);
+        } else {
+          // Fallback: try the account endpoint
+          fetch("/api/subscriptions/verify-plan")
+            .then(res => res.json())
+            .then(planResult => {
+              if (planResult.subscriptionTier) {
+                setSubscriptionTier(planResult.subscriptionTier);
+              }
+              setLoading(false);
+            })
+            .catch(() => setLoading(false));
         }
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        // Fallback: try the account endpoint
+        fetch("/api/subscriptions/verify-plan")
+          .then(res => res.json())
+          .then(planResult => {
+            if (planResult.subscriptionTier) {
+              setSubscriptionTier(planResult.subscriptionTier);
+            }
+            setLoading(false);
+          })
+          .catch(() => setLoading(false));
+      });
   }, []);
 
   const hasCustomBranding = subscriptionTier === "pro" || subscriptionTier === "premium";
@@ -8384,35 +9302,44 @@ function Step5Styling({
         </CardHeader>
         <CardContent className="p-6 space-y-6">
           {/* Tier Info */}
-          <div className={`p-4 rounded-lg border ${
-            subscriptionTier === "free" 
-              ? "bg-slate-700/30 border-slate-600" 
-              : subscriptionTier === "starter"
-              ? "bg-blue-900/20 border-blue-700/50"
-              : "bg-indigo-900/20 border-indigo-700/50"
-          }`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-white">
-                  Current Plan: <span className="text-indigo-300 capitalize">{subscriptionTier}</span>
-                </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  {subscriptionTier === "free" 
-                    ? "Upgrade to Starter or Pro for more styling options"
-                    : subscriptionTier === "starter"
-                    ? "Upgrade to Pro for full custom branding (colors, logos, watermarks)"
-                    : "You have access to all styling features"}
-                </p>
+          {loading ? (
+            <div className="p-4 rounded-lg border bg-slate-700/30 border-slate-600">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                <p className="text-sm text-slate-400">Loading subscription information...</p>
               </div>
-              {subscriptionTier !== "premium" && (
-                <Link href="/dashboard/subscription">
-                  <Button size="sm" variant="outline" className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/30">
-                    Upgrade Plan
-                  </Button>
-                </Link>
-              )}
             </div>
-          </div>
+          ) : (
+            <div className={`p-4 rounded-lg border ${
+              subscriptionTier === "free" 
+                ? "bg-slate-700/30 border-slate-600" 
+                : subscriptionTier === "starter"
+                ? "bg-blue-900/20 border-blue-700/50"
+                : "bg-indigo-900/20 border-indigo-700/50"
+            }`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Current Plan: <span className="text-indigo-300 capitalize">{subscriptionTier}</span>
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {subscriptionTier === "free" 
+                      ? "Upgrade to Starter or Pro for more styling options"
+                      : subscriptionTier === "starter"
+                      ? "Upgrade to Pro for full custom branding (colors, logos, watermarks)"
+                      : "You have access to all styling features"}
+                  </p>
+                </div>
+                {subscriptionTier !== "premium" && (
+                  <Link href="/dashboard/subscription">
+                    <Button size="sm" variant="outline" className="border-indigo-600 text-indigo-300 hover:bg-indigo-900/30">
+                      Upgrade Plan
+                    </Button>
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Style Presets - Large Visual Cards */}
           <div>
@@ -8700,7 +9627,7 @@ function Step6Preview({
   setData: (data: ContractData | ((prev: ContractData) => ContractData)) => void;
 }) {
   const { toast } = useToast();
-  const client = data.client || data.newClient;
+  const [client, setClient] = useState(data.client || data.newClient);
   const paymentSchedule = (data as any).paymentSchedule;
   const paymentMethods = (data as any).paymentMethods || [];
   const paymentScheduleConfig = (data as any).paymentScheduleConfig;
@@ -8708,6 +9635,51 @@ function Step6Preview({
   const [showFullScreenEditor, setShowFullScreenEditor] = useState(false);
   const [editedContent, setEditedContent] = useState(data.content);
   const [insertPaymentIntoContract, setInsertPaymentIntoContract] = useState((data as any).insertPaymentIntoContract ?? true);
+  const [loadingClient, setLoadingClient] = useState(false);
+  const hasFetchedClient = useRef(false);
+
+  // Fetch client if clientId exists but client object is missing
+  useEffect(() => {
+    // If we have a client object, use it
+    if (data.client) {
+      setClient(data.client);
+      hasFetchedClient.current = false; // Reset when client is provided
+      return;
+    }
+    
+    // If we have a newClient object, use it
+    if (data.newClient) {
+      setClient(data.newClient);
+      hasFetchedClient.current = false; // Reset when newClient is provided
+      return;
+    }
+    
+    // If we have clientId but no client object, fetch it (only once)
+    if (data.clientId && !hasFetchedClient.current && !loadingClient) {
+      hasFetchedClient.current = true;
+      setLoadingClient(true);
+      fetch(`/api/clients/${data.clientId}`)
+        .then(async (res) => {
+          if (res.ok) {
+            const result = await res.json();
+            if (result.client) {
+              setClient(result.client);
+              // Update data with client object
+              setData((prev: ContractData) => ({
+                ...prev,
+                client: result.client,
+              }));
+            }
+          }
+          setLoadingClient(false);
+        })
+        .catch((error) => {
+          console.error("Error fetching client:", error);
+          setLoadingClient(false);
+          hasFetchedClient.current = false; // Reset on error so we can retry
+        });
+    }
+  }, [data.clientId, data.client, data.newClient, setData, loadingClient]);
 
   // Generate payment section function
   const generatePaymentSection = (
@@ -8869,12 +9841,23 @@ function Step6Preview({
           </div>
               <div>
                 <Label className="text-slate-400 text-xs uppercase tracking-wide mb-1 block">Client</Label>
-                <p className="text-white font-medium">{client?.name || "No client selected"}</p>
-                {client?.email && (
-                  <p className="text-slate-400 text-sm">{client.email}</p>
-                )}
-                {client?.phone && (
-                  <p className="text-slate-400 text-sm">{client.phone}</p>
+                {loadingClient ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+                    <p className="text-slate-400 text-sm">Loading client...</p>
+                  </div>
+                ) : client?.name ? (
+                  <>
+                    <p className="text-white font-medium">{client.name}</p>
+                    {client.email && (
+                      <p className="text-slate-400 text-sm">{client.email}</p>
+                    )}
+                    {client.phone && (
+                      <p className="text-slate-400 text-sm">{client.phone}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-slate-400 text-sm">No client selected</p>
                 )}
               </div>
             </CardContent>

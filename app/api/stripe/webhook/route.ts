@@ -217,6 +217,85 @@ export async function POST(request: Request) {
 
       console.log(`Payment processed for contract ${contract.id}`);
 
+      // Send payment confirmation emails to both parties (async, don't block)
+      (async () => {
+        try {
+          const { sendEmail } = await import("@/lib/email");
+          const { getPaymentReceivedEmail } = await import("@/lib/email/templates");
+          const { sendNotificationIfEnabled } = await import("@/lib/email/notifications");
+          
+          // Get client and contractor
+          const client = await db.clients.findById(contract.clientId);
+          const contractor = await db.contractors.findById(contract.contractorId);
+          
+          if (!client || !contractor) {
+            console.warn("Client or contractor not found for payment email");
+            return;
+          }
+
+          // Determine payment type and details
+          const paymentType = session.metadata?.type || "deposit";
+          const paymentAmount = (session.amount_total || 0) / 100;
+          const paymentNumber = session.metadata?.paymentNumber ? parseInt(session.metadata.paymentNumber) : undefined;
+          
+          // Calculate remaining balance
+          const payments = await db.payments.findByContractId(contract.id);
+          const totalPaid = payments
+            .filter((p) => p.status === "completed")
+            .reduce((sum, p) => sum + Number(p.amount), 0);
+          const remainingBalance = contract.totalAmount - totalPaid;
+          
+          // Get total payments for split payments
+          let totalPayments: number | undefined;
+          if (paymentType === "split_payment") {
+            const paymentScheduleConfig = contract.fieldValues ? (contract.fieldValues as any)?.paymentScheduleConfig : null;
+            totalPayments = paymentScheduleConfig?.numberOfPayments;
+          }
+
+          // Prepare email data
+          const emailData = {
+            contractTitle: contract.title,
+            contractorName: contractor.name,
+            contractorEmail: contractor.email,
+            contractorCompany: contractor.companyName,
+            clientName: client.name,
+            clientEmail: client.email,
+            paymentAmount,
+            paymentType: paymentType as "deposit" | "full_payment" | "split_payment" | "incremental_payment" | "remaining_balance",
+            paymentNumber,
+            totalPayments,
+            receiptUrl: receiptUrl || undefined,
+            remainingBalance: remainingBalance > 0.01 ? remainingBalance : undefined,
+            totalAmount: contract.totalAmount,
+          };
+
+          // Send email to client (always send)
+          const clientEmail = getPaymentReceivedEmail(emailData, true);
+          await sendEmail({
+            to: client.email,
+            subject: clientEmail.subject,
+            html: clientEmail.html,
+          });
+          console.log(`Payment confirmation email sent to client: ${client.email}`);
+
+          // Send email to contractor (check preferences)
+          const contractorEmail = getPaymentReceivedEmail(emailData, false);
+          await sendNotificationIfEnabled(
+            contractor.id,
+            "paymentReceived",
+            () => sendEmail({
+              to: contractor.email,
+              subject: contractorEmail.subject,
+              html: contractorEmail.html,
+            })
+          );
+          console.log(`Payment confirmation email sent to contractor: ${contractor.email}`);
+        } catch (emailError: any) {
+          console.error("Error sending payment confirmation emails:", emailError);
+          // Don't fail the webhook if email fails
+        }
+      })();
+
       // Only finalize contract if it's fully paid
       if (isFullyPaid) {
         // Finalize contract: Generate PDF + Store + Email (with payment receipt info)

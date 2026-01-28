@@ -8,12 +8,24 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 // GET - Fetch all default templates
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase
+    
+    // Get contractType from query parameters
+    const url = new URL(request.url);
+    const contractType = url.searchParams.get("contractType") as "contract" | "proposal" | null;
+    
+    let query = supabase
       .from("default_contract_templates")
-      .select("*")
+      .select("*");
+    
+    // Filter by contract type if specified
+    if (contractType) {
+      query = query.eq("contract_type", contractType);
+    }
+    
+    const { data, error } = await query
       .order("category", { ascending: true })
       .order("name", { ascending: true });
 

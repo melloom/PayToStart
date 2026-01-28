@@ -40,6 +40,60 @@ export const db = {
       return mapContractorFromDb(data);
     },
 
+    /**
+     * Check if a normalized email already exists
+     * This checks contractors and auth.users to prevent duplicates
+     * like user+tag@gmail.com vs user@gmail.com
+     */
+    async findByNormalizedEmail(normalizedEmail: string): Promise<Contractor | null> {
+      const supabase = await createClient();
+      const { normalizeEmail } = await import("./security/email-validation");
+      
+      // First, try to find exact match (most common case)
+      const exactMatch = await this.findByEmail(normalizedEmail);
+      if (exactMatch) {
+        return exactMatch;
+      }
+
+      // Check contractors table for normalized matches
+      // Limit to recent signups to improve performance (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const { data, error } = await supabase
+        .from("contractors")
+        .select("email")
+        .gte("created_at", thirtyDaysAgo.toISOString())
+        .limit(1000); // Reasonable limit
+
+      if (error || !data) {
+        // If query fails, fall back to checking all (but log warning)
+        console.warn("Failed to query contractors for normalized email check:", error);
+        const { data: allData } = await supabase
+          .from("contractors")
+          .select("email")
+          .limit(5000);
+        
+        if (allData) {
+          for (const contractor of allData) {
+            if (normalizeEmail(contractor.email) === normalizedEmail) {
+              return await this.findByEmail(contractor.email);
+            }
+          }
+        }
+        return null;
+      }
+      
+      // Find matching normalized email in recent signups
+      for (const contractor of data) {
+        if (normalizeEmail(contractor.email) === normalizedEmail) {
+          return await this.findByEmail(contractor.email);
+        }
+      }
+
+      return null;
+    },
+
     async getCurrent(): Promise<Contractor | null> {
       const supabase = await createClient();
       const {

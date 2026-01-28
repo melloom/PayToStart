@@ -15,6 +15,7 @@ import { ContractPreviewWrapper } from "@/components/contract-preview-wrapper";
 import { ContractStatusPoller } from "@/components/contract-status-poller";
 import { UpdateStyleButton } from "@/app/(dashboard)/contracts/[id]/update-style-button";
 import { PasswordToggle } from "./password-toggle";
+import { VoidContractButton } from "./void-contract-button";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -407,6 +408,7 @@ export default async function ContractDetailPage({
                     hasContractorSignature={!!allSignatures.contractorSignature}
                     depositAmount={contract.depositAmount}
                     totalAmount={contract.totalAmount}
+                    contractFieldValues={contract.fieldValues}
                   />
                 </div>
                 
@@ -424,18 +426,14 @@ export default async function ContractDetailPage({
                   </Button>
                 )}
                 
-                {/* Void Contract - show for draft, ready, sent statuses */}
-                {(contract.status === "draft" || contract.status === "ready" || contract.status === "sent") && (
-                  <form action={`/api/contracts/${contract.id}/void`} method="POST" className="w-full">
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      className="w-full text-destructive hover:text-destructive"
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Mark as Void
-                    </Button>
-                  </form>
+                {/* Void Contract - show for draft, ready, sent, signed, paid statuses (before both parties sign or before completion) */}
+                {(contract.status === "draft" || contract.status === "ready" || contract.status === "sent" || contract.status === "signed" || contract.status === "paid") && (
+                  <VoidContractButton 
+                    contractId={contract.id}
+                    contractStatus={contract.status}
+                    hasPayments={payments && payments.some(p => p.status === "completed")}
+                    bothSigned={!!allSignatures.clientSignature && !!allSignatures.contractorSignature}
+                  />
                 )}
                 
                 {/* Style and Password Settings - show for all statuses */}
